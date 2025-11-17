@@ -3659,7 +3659,7 @@ class AgentBotHandlers:
                 }] * quantity
             
             # 重新发送文件
-            files_sent = self.send_batch_files_to_user(uid, items, product_name, order_id)
+            files_sent = self.core.send_batch_files_to_user(uid, items, product_name, order_id)
             
             if files_sent > 0:
                 query.answer("✅ 文件已重新发送，请查收！", show_alert=True)
