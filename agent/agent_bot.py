@@ -76,9 +76,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent_bot")
 
-# 管理员
-ADMIN_USERS = [7004496404]
-
 # 通知群 / 频道
 # ✅ 代理自己的通知群（订单、充值、提现通知发这里）
 AGENT_NOTIFY_CHAT_ID = os.getenv("AGENT_NOTIFY_CHAT_ID")
@@ -216,6 +213,13 @@ class AgentBotConfig:
         except Exception as e:
             logger.error(f"❌ 数据库连接失败: {e}")
             raise
+        
+        # ✅ 管理员配置
+        self.ADMIN_USERS: List[int] = []
+        self._load_admins_from_env()
+        self._load_admins_from_db()
+        if not self.ADMIN_USERS:
+            logger.warning("⚠️ 未配置管理员用户，管理功能将不可用。请通过 ADMIN_USERS 环境变量或 agent_admins 数据库表配置管理员。")
 
     def get_agent_user_collection(self):
         suffix = self.AGENT_BOT_ID[6:] if self.AGENT_BOT_ID.startswith('agent_') else self.AGENT_BOT_ID
@@ -231,6 +235,66 @@ class AgentBotConfig:
         key = self.TRON_API_KEYS[self._tron_key_index % len(self.TRON_API_KEYS)]
         self._tron_key_index = (self._tron_key_index + 1) % max(len(self.TRON_API_KEYS), 1)
         return key
+    
+    def _load_admins_from_env(self):
+        """从环境变量 ADMIN_USERS 加载管理员用户ID列表"""
+        env_admins = os.getenv("ADMIN_USERS", "").strip()
+        if not env_admins:
+            return
+        
+        # 支持逗号和空格分隔
+        # 将逗号替换为空格，然后按空格分割
+        tokens = re.split(r'[,\s]+', env_admins)
+        
+        for token in tokens:
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                user_id = int(token)
+                if user_id not in self.ADMIN_USERS:
+                    self.ADMIN_USERS.append(user_id)
+            except ValueError:
+                logger.warning(f"⚠️ 环境变量 ADMIN_USERS 中的无效用户ID: {token}")
+        
+        if self.ADMIN_USERS:
+            logger.info(f"✅ 从环境变量加载了 {len(self.ADMIN_USERS)} 个管理员用户")
+    
+    def _load_admins_from_db(self):
+        """从 MongoDB agent_admins 集合加载管理员用户ID列表"""
+        try:
+            collection = self.db['agent_admins']
+            query = {
+                "agent_bot_id": self.AGENT_BOT_ID,
+                "enabled": True,
+                "role": {"$in": ["admin", "superadmin"]}
+            }
+            
+            docs = collection.find(query)
+            count = 0
+            for doc in docs:
+                user_id = doc.get('user_id')
+                if user_id and isinstance(user_id, int):
+                    if user_id not in self.ADMIN_USERS:
+                        self.ADMIN_USERS.append(user_id)
+                        count += 1
+            
+            if count > 0:
+                logger.info(f"✅ 从数据库加载了 {count} 个管理员用户")
+        except Exception as e:
+            logger.info(f"ℹ️ 从数据库加载管理员失败（可能集合不存在）: {e}")
+    
+    def reload_admins(self):
+        """重新加载管理员列表"""
+        self.ADMIN_USERS.clear()
+        self._load_admins_from_env()
+        self._load_admins_from_db()
+        logger.info(f"✅ 管理员列表已重新加载，当前管理员: {self.ADMIN_USERS}")
+        return self.ADMIN_USERS
+    
+    def is_admin(self, user_id: int) -> bool:
+        """检查用户是否为管理员"""
+        return int(user_id) in self.ADMIN_USERS
 
 
 class AgentBotCore:
@@ -1236,7 +1300,7 @@ class AgentBotCore:
 
     def request_profit_withdrawal(self, user_id: int, amount: float, withdrawal_address: str) -> Tuple[bool, str]:
         try:
-            if user_id not in ADMIN_USERS:
+            if not self.config.is_admin(user_id):
                 return False, "无权限"
             if amount <= 0:
                 return False, "金额需大于0"
@@ -2233,7 +2297,7 @@ class AgentBotHandlers:
                 [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
                  InlineKeyboardButton("📊 订单历史", callback_data="orders")]
             ]
-            if user.id in ADMIN_USERS:
+            if self.core.config.is_admin(user.id):
                 kb.append([InlineKeyboardButton("💰 价格管理", callback_data="price_management"),
                            InlineKeyboardButton("📊 系统报表", callback_data="system_reports")])
                 kb.append([InlineKeyboardButton("💸 利润提现", callback_data="profit_center")])
@@ -2251,7 +2315,7 @@ class AgentBotHandlers:
             [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
              InlineKeyboardButton("📊 订单历史", callback_data="orders")]
         ]
-        if user.id in ADMIN_USERS:
+        if self.core.config.is_admin(user.id):
             kb.append([InlineKeyboardButton("💰 价格管理", callback_data="price_management"),
                        InlineKeyboardButton("📊 系统报表", callback_data="system_reports")])
             kb.append([InlineKeyboardButton("💸 利润提现", callback_data="profit_center")])
@@ -2260,10 +2324,31 @@ class AgentBotHandlers:
         text = f"🏠 主菜单\n\n当前时间: {self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')}"
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
+    def reload_admins_command(self, update: Update, context: CallbackContext):
+        """重新加载管理员列表（仅管理员可用）"""
+        user = update.effective_user
+        
+        # 检查是否为管理员
+        if not self.core.config.is_admin(user.id):
+            update.message.reply_text("❌ 无权限")
+            return
+        
+        # 重新加载管理员列表
+        admins = self.core.config.reload_admins()
+        
+        # 返回当前管理员列表
+        if admins:
+            admin_list = ", ".join(str(uid) for uid in admins)
+            text = f"✅ 管理员列表已重新加载\n\n当前管理员用户ID:\n{admin_list}"
+        else:
+            text = "⚠️ 管理员列表已重新加载，但当前无管理员配置"
+        
+        update.message.reply_text(text)
+
     # ========== 利润中心 / 提现 ==========
     def show_profit_center(self, query):
         uid = query.from_user.id
-        if uid not in ADMIN_USERS:
+        if not self.core.config.is_admin(uid):
             self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]], parse_mode=None)
             return
         s = self.core.get_profit_summary()
@@ -2291,7 +2376,7 @@ class AgentBotHandlers:
 
     def start_withdrawal(self, query):
         uid = query.from_user.id
-        if uid not in ADMIN_USERS:
+        if not self.core.config.is_admin(uid):
             query.answer("无权限", show_alert=True)
             return
         s = self.core.get_profit_summary()
@@ -2347,7 +2432,7 @@ class AgentBotHandlers:
 
     def show_withdrawal_list(self, query):
         uid = query.from_user.id
-        if uid not in ADMIN_USERS:
+        if not self.core.config.is_admin(uid):
             self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("返回", callback_data="back_main")]], parse_mode=None)
             return
         recs = self.core.config.withdrawal_requests.find({
@@ -3030,7 +3115,7 @@ class AgentBotHandlers:
     # ========== 价格管理 / 报表 ==========
     def show_price_management(self, query, page: int = 1):
         uid = query.from_user.id
-        if uid not in ADMIN_USERS:
+        if not self.core.config.is_admin(uid):
             self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
             return
         res = self.core.get_agent_product_list(uid, page)
@@ -3146,7 +3231,7 @@ class AgentBotHandlers:
 
     def show_system_reports(self, query):
         uid = query.from_user.id
-        if uid not in ADMIN_USERS:
+        if not self.core.config.is_admin(uid):
             self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
             return
         text = ("📊 系统报表中心\n\n"
@@ -3887,6 +3972,7 @@ class AgentBot:
 
     def setup_handlers(self):
         self.dispatcher.add_handler(CommandHandler("start", self.handlers.start_command))
+        self.dispatcher.add_handler(CommandHandler("reload_admins", self.handlers.reload_admins_command))
         self.dispatcher.add_handler(CallbackQueryHandler(self.handlers.button_callback))
         
         # ✅ 群组/频道消息处理（补货通知镜像）- 放在私聊处理器之前
