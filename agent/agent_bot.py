@@ -1903,7 +1903,11 @@ class AgentBotCore:
                 'original_price': origin_price,
                 'agent_price': agent_price,
                 'profit_per_unit': profit_unit,
-                'total_profit': total_profit
+                'total_profit': total_profit,
+                # ✅ 新增字段用于可靠的重新下载
+                'item_ids': ids,  # 所有已售出商品的 ObjectId 列表
+                'first_item_id': str(ids[0]) if ids else '',  # 第一个商品ID（向后兼容/调试）
+                'category': product.get('leixing', '')  # 商品分类
             })
 
             # 群通知
@@ -1944,6 +1948,68 @@ class AgentBotCore:
         except Exception as e:
             logger.error(f"处理购买失败: {e}")
             return False, f"购买处理异常: {e}"
+    
+    def list_user_orders(self, user_id: int, page: int = 1, limit: int = 10) -> Dict:
+        """
+        获取用户的购买订单列表（分页）
+        
+        Args:
+            user_id: 用户ID
+            page: 页码（从1开始）
+            limit: 每页数量
+        
+        Returns:
+            Dict: {
+                'orders': List[Dict],  # 订单列表
+                'total': int,          # 总订单数
+                'current_page': int,   # 当前页码
+                'total_pages': int     # 总页数
+            }
+        """
+        try:
+            order_coll = self.config.get_agent_gmjlu_collection()
+            
+            # 查询条件
+            query = {
+                'leixing': 'purchase',
+                'user_id': user_id
+            }
+            
+            # 计算总数
+            total = order_coll.count_documents(query)
+            
+            if total == 0:
+                return {
+                    'orders': [],
+                    'total': 0,
+                    'current_page': 1,
+                    'total_pages': 0
+                }
+            
+            # 计算分页
+            skip = (page - 1) * limit
+            total_pages = (total + limit - 1) // limit
+            
+            # 查询订单（按时间倒序）
+            orders = list(order_coll.find(query).sort('timer', -1).skip(skip).limit(limit))
+            
+            return {
+                'orders': orders,
+                'total': total,
+                'current_page': page,
+                'total_pages': total_pages
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 获取用户订单列表失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'orders': [],
+                'total': 0,
+                'current_page': 1,
+                'total_pages': 0
+            }
             
     # ---------- 统计 ----------
     def get_sales_statistics(self, days: int = 30) -> Dict:
@@ -3350,90 +3416,72 @@ class AgentBotHandlers:
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_order_history(self, query, page: int = 1):
-        """显示用户订单历史（分页）"""
+        """显示用户订单历史（分页）- HQ风格紧凑列表"""
         uid = query.from_user.id
-        per_page = 10
-        skip = (page - 1) * per_page
         
         try:
-            # 获取订单集合
-            order_coll = self.core.config.get_agent_gmjlu_collection()
+            # 使用新的 API 获取订单
+            result = self.core.list_user_orders(uid, page=page, limit=10)
+            orders = result['orders']
+            total = result['total']
+            total_pages = result['total_pages']
             
-            # 查询用户的购买订单，按时间倒序
-            total_count = order_coll.count_documents({
-                'user_id': uid,
-                'leixing': 'purchase'
-            })
-            
-            if total_count == 0:
+            if total == 0:
                 self.safe_edit_message(
                     query,
-                    "📊 订单历史\n\n暂无购买记录",
+                    "📦 购买记录\n\n暂无购买记录",
                     [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]],
                     parse_mode=None
                 )
                 return
             
-            # 查询当前页的订单
-            orders = list(order_coll.find({
-                'user_id': uid,
-                'leixing': 'purchase'
-            }).sort('timer', -1).skip(skip).limit(per_page))
+            # 构建紧凑的标题栏
+            latest_time = orders[0].get('timer', '-') if orders else '-'
+            # 格式化时间，只显示到分钟
+            try:
+                if latest_time != '-' and len(latest_time) >= 16:
+                    latest_time_display = latest_time[:16]  # YYYY-MM-DD HH:MM
+                else:
+                    latest_time_display = latest_time
+            except:
+                latest_time_display = '-'
             
-            # 计算分页信息
-            total_pages = (total_count + per_page - 1) // per_page
+            text = "📦 购买记录\n\n"
+            text += f"📊 记录概览\n"
+            text += f"• 总订单数：{total}\n"
+            text += f"• 当前页显示：{len(orders)}\n"
+            text += f"• 最近更新：{latest_time_display}\n\n"
+            text += "💡 操作说明\n"
+            text += "点击下面按钮查看订单详情或重新下载商品\n\n"
             
-            # 构建消息文本
-            text = f"📊 <b>订单历史</b>（第{page}/{total_pages}页）\n\n"
-            text += f"📦 共 {total_count} 笔订单\n\n"
-            
+            # 为每个订单构建一个紧凑的按钮
             kb = []
-            for i, order in enumerate(orders, 1):
-                product_name = self.H(order.get('projectname', '未知商品'))
+            for order in orders:
+                product_name = order.get('projectname', '未知商品')
                 quantity = order.get('count', 1)
-                unit_price = float(order.get('ts', 0)) / max(quantity, 1)
-                total_amount = float(order.get('ts', 0))
                 order_time = order.get('timer', '未知时间')
-                order_id = order.get('bianhao', '无订单号')
+                order_id = order.get('bianhao', '')
                 
-                # 订单信息
-                text += f"<b>#{skip + i}</b>\n"
-                text += f"📦 商品：{product_name}\n"
-                text += f"🔢 数量：{quantity}\n"
-                text += f"💴 单价：{unit_price:.2f}U\n"
-                text += f"💰 总额：{total_amount:.2f}U\n"
-                text += f"🕒 时间：{order_time}\n"
-                text += f"📋 订单号：<code>{self.H(order_id)}</code>\n\n"
+                # 格式化时间为 YYYY-MM-DD HH:MM（去掉秒）
+                try:
+                    if len(order_time) >= 16:
+                        time_display = order_time[:16]  # 取前16个字符 YYYY-MM-DD HH:MM
+                    else:
+                        time_display = order_time
+                except:
+                    time_display = order_time
                 
-                # 为每个订单添加按钮行（再次购买 + 下载文件）
-                order_buttons = []
+                # 截断商品名称以适应按钮宽度
+                name_display = product_name[:20] if len(product_name) > 20 else product_name
                 
-                # 查找商品的nowuid以支持"再次购买"
-                nowuid = order.get('nowuid')
-                if not nowuid:
-                    # 如果订单中没有nowuid（旧订单），尝试通过projectname查找
-                    product = self.core.config.ejfl.find_one({'projectname': order.get('projectname')})
-                    if product:
-                        nowuid = product.get('nowuid', '')
+                # 构建按钮文本："商品名 | 数量:N | YYYY-MM-DD HH:MM"
+                button_text = f"{name_display} | 数量:{quantity} | {time_display}"
                 
-                if nowuid:
-                    order_buttons.append(
-                        InlineKeyboardButton(
-                            f"🔄 再次购买",
-                            callback_data=f"product_{nowuid}"
-                        )
-                    )
-                
-                # 添加下载按钮
-                order_buttons.append(
-                    InlineKeyboardButton(
-                        f"📥 下载文件",
-                        callback_data=f"redownload_{order_id}"
-                    )
-                )
-                
-                if order_buttons:
-                    kb.append(order_buttons)
+                # 添加订单详情按钮
+                kb.append([InlineKeyboardButton(
+                    button_text,
+                    callback_data=f"order_detail_{order_id}"
+                )])
             
             # 分页按钮
             pag = []
@@ -3447,7 +3495,7 @@ class AgentBotHandlers:
             # 返回主菜单按钮
             kb.append([InlineKeyboardButton("🏠 主菜单", callback_data="back_main")])
             
-            self.safe_edit_message(query, text, kb, parse_mode='HTML')
+            self.safe_edit_message(query, text, kb, parse_mode=None)
             
         except Exception as e:
             logger.error(f"显示订单历史失败: {e}")
@@ -3459,9 +3507,9 @@ class AgentBotHandlers:
                 [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]],
                 parse_mode=None
             )
-
-    def handle_redownload_order(self, query, order_id: str):
-        """处理重新下载订单文件"""
+    
+    def show_order_detail(self, query, order_id: str):
+        """显示订单详情"""
         uid = query.from_user.id
         
         try:
@@ -3477,7 +3525,73 @@ class AgentBotHandlers:
                 query.answer("❌ 订单不存在或无权访问", show_alert=True)
                 return
             
-            # 获取商品nowuid
+            # 提取订单信息
+            product_name = order.get('projectname', '未知商品')
+            quantity = order.get('count', 1)
+            total_amount = float(order.get('ts', 0))
+            unit_price = total_amount / max(quantity, 1)
+            order_time = order.get('timer', '未知时间')
+            category = order.get('category', '-')
+            nowuid = order.get('nowuid', '')
+            
+            # 构建详情文本
+            text = "📋 订单详情\n\n"
+            text += f"📦 商品：{product_name}\n"
+            text += f"🔢 数量：{quantity}\n"
+            text += f"💴 单价：{unit_price:.2f}U\n"
+            text += f"💰 总额：{total_amount:.2f}U\n"
+            text += f"🕒 时间：{order_time}\n"
+            if category and category != '-':
+                text += f"📂 分类：{category}\n"
+            text += f"📋 订单号：{order_id}\n"
+            
+            # 构建按钮
+            kb = []
+            
+            # 第一行：再次购买 + 下载文件
+            row1 = []
+            if nowuid:
+                row1.append(InlineKeyboardButton(
+                    "🛒 再次购买",
+                    callback_data=f"product_{nowuid}"
+                ))
+            row1.append(InlineKeyboardButton(
+                "📥 下载文件",
+                callback_data=f"redownload_{order_id}"
+            ))
+            if row1:
+                kb.append(row1)
+            
+            # 第二行：返回列表
+            kb.append([InlineKeyboardButton("🔙 返回列表", callback_data="orders")])
+            
+            self.safe_edit_message(query, text, kb, parse_mode=None)
+            query.answer()
+            
+        except Exception as e:
+            logger.error(f"显示订单详情失败: {e}")
+            import traceback
+            traceback.print_exc()
+            query.answer("❌ 加载订单详情失败", show_alert=True)
+
+    def handle_redownload_order(self, query, order_id: str):
+        """处理重新下载订单文件（使用存储的 item_ids）"""
+        uid = query.from_user.id
+        
+        try:
+            # 查询订单
+            order_coll = self.core.config.get_agent_gmjlu_collection()
+            order = order_coll.find_one({
+                'bianhao': order_id,
+                'user_id': uid,
+                'leixing': 'purchase'
+            })
+            
+            if not order:
+                query.answer("❌ 订单不存在或无权访问", show_alert=True)
+                return
+            
+            # 获取商品信息
             nowuid = order.get('nowuid')
             if not nowuid:
                 # 如果旧订单没有nowuid，尝试通过projectname查找
@@ -3488,37 +3602,64 @@ class AgentBotHandlers:
                     query.answer("❌ 无法找到商品信息", show_alert=True)
                     return
             
-            # 获取商品信息
             product = self.core.config.ejfl.find_one({'nowuid': nowuid})
             if not product:
                 query.answer("❌ 商品已不存在", show_alert=True)
                 return
             
-            # 获取已售出的商品项（根据订单中的商品ID）
+            product_name = product.get('projectname', '')
             quantity = order.get('count', 1)
-            item_type = product.get('leixing', '')
             
-            # 尝试查找已售出的商品（使用订单时间范围）
-            order_time = order.get('timer', '')
-            items = list(self.core.config.hb.find({
-                'nowuid': nowuid,
-                'state': 1,
-                'gmid': uid
-            }).limit(quantity))
+            # ✅ 优先使用订单中存储的 item_ids（新订单）
+            item_ids = order.get('item_ids')
+            items = []
             
+            if item_ids:
+                # 新订单：使用存储的 item_ids
+                logger.info(f"使用存储的 item_ids 重新下载订单 {order_id}，共 {len(item_ids)} 个商品")
+                items = list(self.core.config.hb.find({'_id': {'$in': item_ids}}))
+                
+                if len(items) != len(item_ids):
+                    logger.warning(f"部分商品项已丢失：期望 {len(item_ids)} 个，实际找到 {len(items)} 个")
+            
+            # ✅ 回退方案1：使用 first_item_id（调试/向后兼容）
             if not items:
-                # 如果找不到具体商品，使用通用方法
+                first_item_id = order.get('first_item_id')
+                if first_item_id:
+                    try:
+                        first_item = self.core.config.hb.find_one({'_id': ObjectId(first_item_id)})
+                        if first_item:
+                            items.append(first_item)
+                            logger.info(f"使用 first_item_id 找到第一个商品，尝试查找其它商品")
+                    except:
+                        pass
+            
+            # ✅ 回退方案2：查找该用户购买的同类商品（旧订单或数据丢失）
+            if not items or len(items) < quantity:
+                logger.warning(f"使用回退方案查找订单 {order_id} 的商品")
+                fallback_items = list(self.core.config.hb.find({
+                    'nowuid': nowuid,
+                    'state': 1,
+                    'gmid': uid
+                }).limit(quantity))
+                
+                if fallback_items:
+                    items = fallback_items
+                    logger.info(f"回退方案找到 {len(items)} 个商品")
+            
+            # ✅ 最后的回退：创建临时项用于文件发送
+            if not items:
+                logger.warning(f"无法找到订单 {order_id} 的原始商品，创建临时项")
                 query.answer("⚠️ 未找到原始商品文件，正在尝试重新获取...", show_alert=False)
-                # 创建临时项以发送文件
+                item_type = product.get('leixing', '')
                 items = [{
                     'nowuid': nowuid,
                     'leixing': item_type,
-                    'projectname': product.get('projectname', '')
+                    'projectname': product_name
                 }] * quantity
             
             # 重新发送文件
-            product_name = product.get('projectname', '')
-            files_sent = self.send_batch_files_to_user(uid, items, product_name, order_id)
+            files_sent = self.core.send_batch_files_to_user(uid, items, product_name, order_id)
             
             if files_sent > 0:
                 query.answer("✅ 文件已重新发送，请查收！", show_alert=True)
@@ -3549,6 +3690,8 @@ class AgentBotHandlers:
                 self.show_order_history(q); q.answer(); return
             elif d.startswith("orders_page_"):
                 self.show_order_history(q, int(d.replace("orders_page_",""))); q.answer(); return
+            elif d.startswith("order_detail_"):
+                self.show_order_detail(q, d.replace("order_detail_","")); return
             elif d.startswith("redownload_"):
                 self.handle_redownload_order(q, d.replace("redownload_","")); return
             elif d == "support":
