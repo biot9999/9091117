@@ -3357,7 +3357,7 @@ class AgentBotHandlers:
         
         try:
             # 获取订单集合
-            order_coll = self.config.get_agent_gmjlu_collection()
+            order_coll = self.core.config.get_agent_gmjlu_collection()
             
             # 查询用户的购买订单，按时间倒序
             total_count = order_coll.count_documents({
@@ -3389,7 +3389,7 @@ class AgentBotHandlers:
             
             kb = []
             for i, order in enumerate(orders, 1):
-                product_name = self._h(order.get('projectname', '未知商品'))
+                product_name = self.H(order.get('projectname', '未知商品'))
                 quantity = order.get('count', 1)
                 unit_price = float(order.get('ts', 0)) / max(quantity, 1)
                 total_amount = float(order.get('ts', 0))
@@ -3403,7 +3403,7 @@ class AgentBotHandlers:
                 text += f"💴 单价：{unit_price:.2f}U\n"
                 text += f"💰 总额：{total_amount:.2f}U\n"
                 text += f"🕒 时间：{order_time}\n"
-                text += f"📋 订单号：<code>{self._h(order_id)}</code>\n\n"
+                text += f"📋 订单号：<code>{self.H(order_id)}</code>\n\n"
                 
                 # 为每个订单添加按钮行（再次购买 + 下载文件）
                 order_buttons = []
@@ -3412,7 +3412,7 @@ class AgentBotHandlers:
                 nowuid = order.get('nowuid')
                 if not nowuid:
                     # 如果订单中没有nowuid（旧订单），尝试通过projectname查找
-                    product = self.config.ejfl.find_one({'projectname': order.get('projectname')})
+                    product = self.core.config.ejfl.find_one({'projectname': order.get('projectname')})
                     if product:
                         nowuid = product.get('nowuid', '')
                 
@@ -3466,7 +3466,7 @@ class AgentBotHandlers:
         
         try:
             # 查询订单
-            order_coll = self.config.get_agent_gmjlu_collection()
+            order_coll = self.core.config.get_agent_gmjlu_collection()
             order = order_coll.find_one({
                 'bianhao': order_id,
                 'user_id': uid,
@@ -3481,7 +3481,7 @@ class AgentBotHandlers:
             nowuid = order.get('nowuid')
             if not nowuid:
                 # 如果旧订单没有nowuid，尝试通过projectname查找
-                product = self.config.ejfl.find_one({'projectname': order.get('projectname')})
+                product = self.core.config.ejfl.find_one({'projectname': order.get('projectname')})
                 if product:
                     nowuid = product.get('nowuid')
                 else:
@@ -3489,7 +3489,7 @@ class AgentBotHandlers:
                     return
             
             # 获取商品信息
-            product = self.config.ejfl.find_one({'nowuid': nowuid})
+            product = self.core.config.ejfl.find_one({'nowuid': nowuid})
             if not product:
                 query.answer("❌ 商品已不存在", show_alert=True)
                 return
@@ -3500,7 +3500,7 @@ class AgentBotHandlers:
             
             # 尝试查找已售出的商品（使用订单时间范围）
             order_time = order.get('timer', '')
-            items = list(self.config.hb.find({
+            items = list(self.core.config.hb.find({
                 'nowuid': nowuid,
                 'state': 1,
                 'gmid': uid
