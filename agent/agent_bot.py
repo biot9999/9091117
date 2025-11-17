@@ -1894,6 +1894,7 @@ class AgentBotCore:
                 'bianhao': order_id,
                 'user_id': user_id,
                 'projectname': product.get('projectname', ''),
+                'nowuid': product_nowuid,  # ✅ 添加nowuid以支持重新下载
                 'text': str(ids[0]) if ids else '',
                 'ts': total_cost,
                 'timer': sale_time,
@@ -3348,8 +3349,187 @@ class AgentBotHandlers:
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
-    def show_order_history(self, query):
-        self.safe_edit_message(query, "📊 订单历史功能暂未实现", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+    def show_order_history(self, query, page: int = 1):
+        """显示用户订单历史（分页）"""
+        uid = query.from_user.id
+        per_page = 10
+        skip = (page - 1) * per_page
+        
+        try:
+            # 获取订单集合
+            order_coll = self.core.config.get_agent_gmjlu_collection()
+            
+            # 查询用户的购买订单，按时间倒序
+            total_count = order_coll.count_documents({
+                'user_id': uid,
+                'leixing': 'purchase'
+            })
+            
+            if total_count == 0:
+                self.safe_edit_message(
+                    query,
+                    "📊 订单历史\n\n暂无购买记录",
+                    [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]],
+                    parse_mode=None
+                )
+                return
+            
+            # 查询当前页的订单
+            orders = list(order_coll.find({
+                'user_id': uid,
+                'leixing': 'purchase'
+            }).sort('timer', -1).skip(skip).limit(per_page))
+            
+            # 计算分页信息
+            total_pages = (total_count + per_page - 1) // per_page
+            
+            # 构建消息文本
+            text = f"📊 <b>订单历史</b>（第{page}/{total_pages}页）\n\n"
+            text += f"📦 共 {total_count} 笔订单\n\n"
+            
+            kb = []
+            for i, order in enumerate(orders, 1):
+                product_name = self.H(order.get('projectname', '未知商品'))
+                quantity = order.get('count', 1)
+                unit_price = float(order.get('ts', 0)) / max(quantity, 1)
+                total_amount = float(order.get('ts', 0))
+                order_time = order.get('timer', '未知时间')
+                order_id = order.get('bianhao', '无订单号')
+                
+                # 订单信息
+                text += f"<b>#{skip + i}</b>\n"
+                text += f"📦 商品：{product_name}\n"
+                text += f"🔢 数量：{quantity}\n"
+                text += f"💴 单价：{unit_price:.2f}U\n"
+                text += f"💰 总额：{total_amount:.2f}U\n"
+                text += f"🕒 时间：{order_time}\n"
+                text += f"📋 订单号：<code>{self.H(order_id)}</code>\n\n"
+                
+                # 为每个订单添加按钮行（再次购买 + 下载文件）
+                order_buttons = []
+                
+                # 查找商品的nowuid以支持"再次购买"
+                nowuid = order.get('nowuid')
+                if not nowuid:
+                    # 如果订单中没有nowuid（旧订单），尝试通过projectname查找
+                    product = self.core.config.ejfl.find_one({'projectname': order.get('projectname')})
+                    if product:
+                        nowuid = product.get('nowuid', '')
+                
+                if nowuid:
+                    order_buttons.append(
+                        InlineKeyboardButton(
+                            f"🔄 再次购买",
+                            callback_data=f"product_{nowuid}"
+                        )
+                    )
+                
+                # 添加下载按钮
+                order_buttons.append(
+                    InlineKeyboardButton(
+                        f"📥 下载文件",
+                        callback_data=f"redownload_{order_id}"
+                    )
+                )
+                
+                if order_buttons:
+                    kb.append(order_buttons)
+            
+            # 分页按钮
+            pag = []
+            if page > 1:
+                pag.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"orders_page_{page-1}"))
+            if page < total_pages:
+                pag.append(InlineKeyboardButton("➡️ 下一页", callback_data=f"orders_page_{page+1}"))
+            if pag:
+                kb.append(pag)
+            
+            # 返回主菜单按钮
+            kb.append([InlineKeyboardButton("🏠 主菜单", callback_data="back_main")])
+            
+            self.safe_edit_message(query, text, kb, parse_mode='HTML')
+            
+        except Exception as e:
+            logger.error(f"显示订单历史失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.safe_edit_message(
+                query,
+                "❌ 加载订单历史失败",
+                [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]],
+                parse_mode=None
+            )
+
+    def handle_redownload_order(self, query, order_id: str):
+        """处理重新下载订单文件"""
+        uid = query.from_user.id
+        
+        try:
+            # 查询订单
+            order_coll = self.core.config.get_agent_gmjlu_collection()
+            order = order_coll.find_one({
+                'bianhao': order_id,
+                'user_id': uid,
+                'leixing': 'purchase'
+            })
+            
+            if not order:
+                query.answer("❌ 订单不存在或无权访问", show_alert=True)
+                return
+            
+            # 获取商品nowuid
+            nowuid = order.get('nowuid')
+            if not nowuid:
+                # 如果旧订单没有nowuid，尝试通过projectname查找
+                product = self.core.config.ejfl.find_one({'projectname': order.get('projectname')})
+                if product:
+                    nowuid = product.get('nowuid')
+                else:
+                    query.answer("❌ 无法找到商品信息", show_alert=True)
+                    return
+            
+            # 获取商品信息
+            product = self.core.config.ejfl.find_one({'nowuid': nowuid})
+            if not product:
+                query.answer("❌ 商品已不存在", show_alert=True)
+                return
+            
+            # 获取已售出的商品项（根据订单中的商品ID）
+            quantity = order.get('count', 1)
+            item_type = product.get('leixing', '')
+            
+            # 尝试查找已售出的商品（使用订单时间范围）
+            order_time = order.get('timer', '')
+            items = list(self.core.config.hb.find({
+                'nowuid': nowuid,
+                'state': 1,
+                'gmid': uid
+            }).limit(quantity))
+            
+            if not items:
+                # 如果找不到具体商品，使用通用方法
+                query.answer("⚠️ 未找到原始商品文件，正在尝试重新获取...", show_alert=False)
+                # 创建临时项以发送文件
+                items = [{
+                    'nowuid': nowuid,
+                    'leixing': item_type,
+                    'projectname': product.get('projectname', '')
+                }] * quantity
+            
+            # 重新发送文件
+            product_name = product.get('projectname', '')
+            files_sent = self.send_batch_files_to_user(uid, items, product_name, order_id)
+            
+            if files_sent > 0:
+                query.answer("✅ 文件已重新发送，请查收！", show_alert=True)
+            else:
+                query.answer("❌ 文件发送失败，请联系客服", show_alert=True)
+                
+        except Exception as e:
+            logger.error(f"重新下载订单文件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            query.answer("❌ 下载失败，请稍后重试", show_alert=True)
 
     # ========== 回调分发 ==========
     def button_callback(self, update: Update, context: CallbackContext):
@@ -3367,6 +3547,10 @@ class AgentBotHandlers:
                 self.show_recharge_options(q); q.answer(); return
             elif d == "orders":
                 self.show_order_history(q); q.answer(); return
+            elif d.startswith("orders_page_"):
+                self.show_order_history(q, int(d.replace("orders_page_",""))); q.answer(); return
+            elif d.startswith("redownload_"):
+                self.handle_redownload_order(q, d.replace("redownload_","")); return
             elif d == "support":
                 self.show_support_info(q); q.answer(); return
             elif d == "help":
