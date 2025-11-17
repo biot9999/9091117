@@ -196,6 +196,11 @@ class AgentBotConfig:
         
         # ✅ 默认代理加价（新商品自动同步时的默认加价）
         self.AGENT_DEFAULT_MARKUP = float(os.getenv("AGENT_DEFAULT_MARKUP", "0.2"))
+        
+        # ✅ 客服联系方式配置
+        self.SUPPORT_CONTACT_USERNAME = os.getenv("SUPPORT_CONTACT_USERNAME", "9haokf")
+        self.SUPPORT_CONTACT_URL = os.getenv("SUPPORT_CONTACT_URL") or f"https://t.me/{self.SUPPORT_CONTACT_USERNAME}"
+        self.SUPPORT_CONTACT_DISPLAY = os.getenv("SUPPORT_CONTACT_DISPLAY")
 
         try:
             self.client = MongoClient(self.MONGODB_URI)
@@ -3315,9 +3320,11 @@ class AgentBotHandlers:
 
     # ========== 其它 ==========
     def show_support_info(self, query):
-        text = "📞 客服 @9haokf\n请描述问题 + 用户ID/订单号，便于快速处理。"
+        # Build display text using config
+        display = self.core.config.SUPPORT_CONTACT_DISPLAY or f"@{self.core.config.SUPPORT_CONTACT_USERNAME}"
+        text = f"📞 客服 {display}\n请描述问题 + 用户ID/订单号，便于快速处理。"
         kb = [
-            [InlineKeyboardButton("💬 联系客服", url="https://t.me/9haokf")],
+            [InlineKeyboardButton("💬 联系客服", url=self.core.config.SUPPORT_CONTACT_URL)],
             [InlineKeyboardButton("👤 个人中心", callback_data="profile"),
              InlineKeyboardButton("❓ 使用帮助", callback_data="help")],
             [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
@@ -3325,12 +3332,14 @@ class AgentBotHandlers:
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_help_info(self, query):
+        # Build display text using config
+        display = self.core.config.SUPPORT_CONTACT_DISPLAY or f"@{self.core.config.SUPPORT_CONTACT_USERNAME}"
         text = (
             "❓ 使用帮助\n\n"
             "• 购买：分类 -> 商品 -> 立即购买 -> 输入数量\n"
             "• 充值：进入充值 -> 选择金额或输入金额 -> 按识别金额精确转账\n"
             "• 自动监听入账，无需手动校验\n"
-            "• 有问题联系人工客服 @9haokf"
+            f"• 有问题联系人工客服 {display}"
         )
         kb = [
             [InlineKeyboardButton("📞 联系客服", callback_data="support"),
