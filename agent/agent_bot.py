@@ -1894,6 +1894,7 @@ class AgentBotCore:
                 'bianhao': order_id,
                 'user_id': user_id,
                 'projectname': product.get('projectname', ''),
+                'nowuid': product_nowuid,  # ✅ 添加nowuid以支持重新下载
                 'text': str(ids[0]) if ids else '',
                 'ts': total_cost,
                 'timer': sale_time,
@@ -3404,16 +3405,35 @@ class AgentBotHandlers:
                 text += f"🕒 时间：{order_time}\n"
                 text += f"📋 订单号：<code>{self._h(order_id)}</code>\n\n"
                 
+                # 为每个订单添加按钮行（再次购买 + 下载文件）
+                order_buttons = []
+                
                 # 查找商品的nowuid以支持"再次购买"
-                product = self.config.ejfl.find_one({'projectname': order.get('projectname')})
-                if product:
-                    nowuid = product.get('nowuid', '')
-                    kb.append([
+                nowuid = order.get('nowuid')
+                if not nowuid:
+                    # 如果订单中没有nowuid（旧订单），尝试通过projectname查找
+                    product = self.config.ejfl.find_one({'projectname': order.get('projectname')})
+                    if product:
+                        nowuid = product.get('nowuid', '')
+                
+                if nowuid:
+                    order_buttons.append(
                         InlineKeyboardButton(
-                            f"🔄 再次购买 {product_name[:15]}",
+                            f"🔄 再次购买",
                             callback_data=f"product_{nowuid}"
                         )
-                    ])
+                    )
+                
+                # 添加下载按钮
+                order_buttons.append(
+                    InlineKeyboardButton(
+                        f"📥 下载文件",
+                        callback_data=f"redownload_{order_id}"
+                    )
+                )
+                
+                if order_buttons:
+                    kb.append(order_buttons)
             
             # 分页按钮
             pag = []
@@ -3440,6 +3460,77 @@ class AgentBotHandlers:
                 parse_mode=None
             )
 
+    def handle_redownload_order(self, query, order_id: str):
+        """处理重新下载订单文件"""
+        uid = query.from_user.id
+        
+        try:
+            # 查询订单
+            order_coll = self.config.get_agent_gmjlu_collection()
+            order = order_coll.find_one({
+                'bianhao': order_id,
+                'user_id': uid,
+                'leixing': 'purchase'
+            })
+            
+            if not order:
+                query.answer("❌ 订单不存在或无权访问", show_alert=True)
+                return
+            
+            # 获取商品nowuid
+            nowuid = order.get('nowuid')
+            if not nowuid:
+                # 如果旧订单没有nowuid，尝试通过projectname查找
+                product = self.config.ejfl.find_one({'projectname': order.get('projectname')})
+                if product:
+                    nowuid = product.get('nowuid')
+                else:
+                    query.answer("❌ 无法找到商品信息", show_alert=True)
+                    return
+            
+            # 获取商品信息
+            product = self.config.ejfl.find_one({'nowuid': nowuid})
+            if not product:
+                query.answer("❌ 商品已不存在", show_alert=True)
+                return
+            
+            # 获取已售出的商品项（根据订单中的商品ID）
+            quantity = order.get('count', 1)
+            item_type = product.get('leixing', '')
+            
+            # 尝试查找已售出的商品（使用订单时间范围）
+            order_time = order.get('timer', '')
+            items = list(self.config.hb.find({
+                'nowuid': nowuid,
+                'state': 1,
+                'gmid': uid
+            }).limit(quantity))
+            
+            if not items:
+                # 如果找不到具体商品，使用通用方法
+                query.answer("⚠️ 未找到原始商品文件，正在尝试重新获取...", show_alert=False)
+                # 创建临时项以发送文件
+                items = [{
+                    'nowuid': nowuid,
+                    'leixing': item_type,
+                    'projectname': product.get('projectname', '')
+                }] * quantity
+            
+            # 重新发送文件
+            product_name = product.get('projectname', '')
+            files_sent = self.send_batch_files_to_user(uid, items, product_name, order_id)
+            
+            if files_sent > 0:
+                query.answer("✅ 文件已重新发送，请查收！", show_alert=True)
+            else:
+                query.answer("❌ 文件发送失败，请联系客服", show_alert=True)
+                
+        except Exception as e:
+            logger.error(f"重新下载订单文件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            query.answer("❌ 下载失败，请稍后重试", show_alert=True)
+
     # ========== 回调分发 ==========
     def button_callback(self, update: Update, context: CallbackContext):
         q = update.callback_query
@@ -3458,6 +3549,8 @@ class AgentBotHandlers:
                 self.show_order_history(q); q.answer(); return
             elif d.startswith("orders_page_"):
                 self.show_order_history(q, int(d.replace("orders_page_",""))); q.answer(); return
+            elif d.startswith("redownload_"):
+                self.handle_redownload_order(q, d.replace("redownload_","")); return
             elif d == "support":
                 self.show_support_info(q); q.answer(); return
             elif d == "help":
