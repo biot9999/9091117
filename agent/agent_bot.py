@@ -2374,7 +2374,8 @@ class AgentBotHandlers:
             old_text = (getattr(query.message, "text", "") or "")
             if old_text.strip() == text.strip():
                 try:
-                    query.answer("界面已是最新状态")
+                    uid = query.from_user.id
+                    query.answer(self.core._t("ui_already_latest", uid))
                 except:
                     pass
                 return
@@ -2384,9 +2385,10 @@ class AgentBotHandlers:
         except Exception as e:
             msg = str(e)
             try:
+                uid = query.from_user.id if query and query.from_user else None
                 if "Message is not modified" in msg:
                     try:
-                        query.answer("界面已是最新状态")
+                        query.answer(self.core._t("ui_already_latest", uid) if uid else "UI already up to date")
                     except:
                         pass
                 elif "Can't parse entities" in msg or "can't parse entities" in msg:
@@ -2751,27 +2753,26 @@ class AgentBotHandlers:
     # ========== 商品相关 ==========
     def show_product_categories(self, query):
         """显示商品分类（增强版：支持显示零库存分类）"""
+        uid = query.from_user.id
         try:
             # ✅ 调用核心方法获取分类列表（包含零库存分类）
             categories = self.core.get_product_categories()
             
             if not categories:
-                self.safe_edit_message(query, "❌ 暂无可用商品分类", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+                self.safe_edit_message(query, self.core._t("products_no_categories", uid), [[InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]], parse_mode=None)
                 return
             
             text = (
-                "🛒 <b>商品分类 - 请选择所需商品：</b>\n\n"
-                "「快送商品区」-「热选择所需商品」\n\n"
-                "<b>❗️首次购买请先少量测试，避免纠纷</b>！\n\n"
-                "<b>❗️长期未使用账户可能会出现问题，联系客服处理</b>。"
+                f"<b>{self.core._t('products_title', uid)}</b>\n\n"
+                f"{self.core._t('products_select_category', uid)}"
             )
             
             kb = []
             for cat in categories:
-                button_text = f"{cat['_id']}  [{cat['stock']}个]"
+                button_text = f"{cat['_id']}  [{cat['stock']}{self.core._t('products_items', uid)}]"
                 kb.append([InlineKeyboardButton(button_text, callback_data=f"category_{cat['_id']}")])
             
-            kb.append([InlineKeyboardButton("🏠 主菜单", callback_data="back_main")])
+            kb.append([InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")])
             
             self.safe_edit_message(query, text, kb, parse_mode='HTML')
             
@@ -2779,7 +2780,7 @@ class AgentBotHandlers:
             logger.error(f"❌ 获取商品分类失败: {e}")
             import traceback
             traceback.print_exc()
-            self.safe_edit_message(query, "❌ 加载失败，请重试", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t("error_generic", uid), [[InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]], parse_mode=None)
             
     def show_category_products(self, query, category: str, page: int = 1):
         """显示分类下的商品（二级分类）- 支持HQ克隆模式 + 统一协议号分类"""
@@ -3602,31 +3603,33 @@ class AgentBotHandlers:
 
     # ========== 其它 ==========
     def show_support_info(self, query):
+        uid = query.from_user.id
         # Build display text using config
         display = self.core.config.SUPPORT_CONTACT_DISPLAY or f"@{self.core.config.SUPPORT_CONTACT_USERNAME}"
-        text = f"📞 客服 {display}\n请描述问题 + 用户ID/订单号，便于快速处理。"
+        text = self.core._t("support_contact", uid, contact=display) + "\n" + self.core._t("support_description", uid)
         kb = [
-            [InlineKeyboardButton("💬 联系客服", url=self.core.config.SUPPORT_CONTACT_URL)],
-            [InlineKeyboardButton("👤 个人中心", callback_data="profile"),
-             InlineKeyboardButton("❓ 使用帮助", callback_data="help")],
-            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
+            [InlineKeyboardButton(self.core._t("support_button_contact", uid), url=self.core.config.SUPPORT_CONTACT_URL)],
+            [InlineKeyboardButton(self.core._t("support_button_profile", uid), callback_data="profile"),
+             InlineKeyboardButton(self.core._t("support_button_help", uid), callback_data="help")],
+            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_help_info(self, query):
+        uid = query.from_user.id
         # Build display text using config
         display = self.core.config.SUPPORT_CONTACT_DISPLAY or f"@{self.core.config.SUPPORT_CONTACT_USERNAME}"
         text = (
-            "❓ 使用帮助\n\n"
-            "• 购买：分类 -> 商品 -> 立即购买 -> 输入数量\n"
-            "• 充值：进入充值 -> 选择金额或输入金额 -> 按识别金额精确转账\n"
-            "• 自动监听入账，无需手动校验\n"
-            f"• 有问题联系人工客服 {display}"
+            f"{self.core._t('help_title', uid)}\n\n"
+            f"{self.core._t('help_purchase', uid)}\n"
+            f"{self.core._t('help_recharge', uid)}\n"
+            f"{self.core._t('help_auto_settle', uid)}\n"
+            f"{self.core._t('help_contact', uid, contact=display)}"
         )
         kb = [
-            [InlineKeyboardButton("📞 联系客服", callback_data="support"),
-             InlineKeyboardButton("🛍️ 商品中心", callback_data="products")],
-            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
+            [InlineKeyboardButton(self.core._t("help_button_contact_support", uid), callback_data="support"),
+             InlineKeyboardButton(self.core._t("help_button_products", uid), callback_data="products")],
+            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
