@@ -22,6 +22,7 @@ import random
 import requests
 import threading
 import re
+import json
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -89,6 +90,134 @@ AGENT_RESTOCK_NOTIFY_CHAT_ID = os.getenv("AGENT_RESTOCK_NOTIFY_CHAT_ID")
 # ✅ 统一协议号分类配置
 AGENT_PROTOCOL_CATEGORY_UNIFIED = os.getenv("AGENT_PROTOCOL_CATEGORY_UNIFIED", "🔥二次协议号（session+json）")
 AGENT_PROTOCOL_CATEGORY_ALIASES = os.getenv("AGENT_PROTOCOL_CATEGORY_ALIASES", "协议号,未分类,,🔥二手TG协议号（session+json）,二手TG协议号（session+json）,二次协议号（session+json）")
+
+# ================= i18n Language System =================
+class I18nManager:
+    """国际化语言管理器"""
+    def __init__(self):
+        self.locales_dir = Path(__file__).parent / "locales"
+        self.translations = {}
+        self.supported_languages = []
+        self.default_lang = os.getenv("AGENT_DEFAULT_LANG", "zh")
+        
+        # Load and validate language packs
+        self._load_translations()
+        self._validate_coverage()
+    
+    def _load_translations(self):
+        """加载所有语言包"""
+        if not self.locales_dir.exists():
+            logger.error(f"❌ Locales directory not found: {self.locales_dir}")
+            sys.exit(1)
+        
+        for lang_file in self.locales_dir.glob("*.json"):
+            lang_code = lang_file.stem
+            try:
+                with open(lang_file, 'r', encoding='utf-8') as f:
+                    self.translations[lang_code] = json.load(f)
+                self.supported_languages.append(lang_code)
+                logger.info(f"✅ Loaded language pack: {lang_code} ({len(self.translations[lang_code])} keys)")
+            except Exception as e:
+                logger.error(f"❌ Failed to load language pack {lang_file}: {e}")
+                sys.exit(1)
+        
+        if not self.translations:
+            logger.error("❌ No language packs found in locales/ directory")
+            sys.exit(1)
+        
+        if self.default_lang not in self.translations:
+            logger.error(f"❌ Default language '{self.default_lang}' not found in available languages: {self.supported_languages}")
+            sys.exit(1)
+    
+    def _validate_coverage(self):
+        """严格验证语言包覆盖率（所有语言的键必须完全一致）"""
+        if len(self.translations) < 2:
+            logger.warning("⚠️ Only one language pack found, skipping coverage check")
+            return
+        
+        # Get reference keys from default language
+        reference_lang = self.default_lang
+        reference_keys = set(self.translations[reference_lang].keys())
+        
+        # Check all other languages against reference
+        errors = []
+        for lang_code, translations in self.translations.items():
+            if lang_code == reference_lang:
+                continue
+            
+            current_keys = set(translations.keys())
+            
+            # Find missing and extra keys
+            missing_keys = reference_keys - current_keys
+            extra_keys = current_keys - reference_keys
+            
+            if missing_keys:
+                errors.append(f"  ❌ Language '{lang_code}' is missing {len(missing_keys)} key(s):")
+                for key in sorted(missing_keys)[:10]:  # Show first 10
+                    errors.append(f"     - {key}")
+                if len(missing_keys) > 10:
+                    errors.append(f"     ... and {len(missing_keys) - 10} more")
+            
+            if extra_keys:
+                errors.append(f"  ❌ Language '{lang_code}' has {len(extra_keys)} extra key(s):")
+                for key in sorted(extra_keys)[:10]:  # Show first 10
+                    errors.append(f"     - {key}")
+                if len(extra_keys) > 10:
+                    errors.append(f"     ... and {len(extra_keys) - 10} more")
+        
+        if errors:
+            logger.error("❌ Language pack coverage validation FAILED:")
+            logger.error(f"  Reference language: {reference_lang} ({len(reference_keys)} keys)")
+            for error in errors:
+                logger.error(error)
+            logger.error("\n💡 All language packs must have exactly the same keys!")
+            logger.error("   Please update the language files to match and try again.")
+            sys.exit(1)
+        
+        logger.info(f"✅ Language pack coverage validation PASSED: All {len(self.translations)} languages have {len(reference_keys)} matching keys")
+    
+    def get(self, key: str, lang: str = None, **kwargs) -> str:
+        """
+        获取翻译文本
+        
+        Args:
+            key: 翻译键
+            lang: 语言代码，如果为None则使用默认语言
+            **kwargs: 模板参数
+        
+        Returns:
+            翻译后的文本
+        """
+        lang = lang or self.default_lang
+        
+        # Fallback to default language if requested language not found
+        if lang not in self.translations:
+            lang = self.default_lang
+        
+        # Get translation
+        text = self.translations[lang].get(key)
+        
+        # Fallback to default language if key not found
+        if text is None and lang != self.default_lang:
+            text = self.translations[self.default_lang].get(key)
+        
+        # Fallback to key itself if not found
+        if text is None:
+            logger.warning(f"⚠️ Translation key not found: {key}")
+            return f"[{key}]"
+        
+        # Format with kwargs if provided
+        if kwargs:
+            try:
+                return text.format(**kwargs)
+            except KeyError as e:
+                logger.warning(f"⚠️ Missing template parameter {e} for key {key}")
+                return text
+        
+        return text
+
+# Initialize i18n manager
+i18n = I18nManager()
 
 class AgentBotConfig:
     """代理机器人配置"""
@@ -528,7 +657,8 @@ class AgentBotCore:
                 'register_time': now,
                 'last_active': now,
                 'last_contact_time': now,
-                'status': 'active'
+                'status': 'active',
+                'lang': i18n.default_lang  # Set default language
             })
             logger.info(f"✅ 用户注册成功 {user_id}")
             return True
@@ -542,6 +672,53 @@ class AgentBotCore:
         except Exception as e:
             logger.error(f"❌ 获取用户信息失败: {e}")
             return None
+    
+    def get_user_lang(self, user_id: int) -> str:
+        """获取用户语言偏好"""
+        user = self.get_user_info(user_id)
+        if user and 'lang' in user:
+            return user['lang']
+        return i18n.default_lang
+    
+    def set_user_lang(self, user_id: int, lang: str) -> bool:
+        """设置用户语言偏好"""
+        try:
+            if lang not in i18n.supported_languages:
+                logger.warning(f"⚠️ Unsupported language: {lang}")
+                return False
+            
+            coll = self.config.get_agent_user_collection()
+            result = coll.update_one(
+                {'user_id': user_id},
+                {'$set': {'lang': lang}}
+            )
+            if result.modified_count > 0:
+                logger.info(f"✅ User {user_id} language updated to {lang}")
+                return True
+            else:
+                # User might not exist yet, try to create
+                user = coll.find_one({'user_id': user_id})
+                if not user:
+                    logger.warning(f"⚠️ User {user_id} not found, cannot set language")
+                return False
+        except Exception as e:
+            logger.error(f"❌ 设置用户语言失败: {e}")
+            return False
+    
+    def _t(self, key: str, user_id: int = None, **kwargs) -> str:
+        """
+        Translation helper
+        
+        Args:
+            key: Translation key
+            user_id: User ID to get language preference, if None uses default
+            **kwargs: Template parameters
+        
+        Returns:
+            Translated text
+        """
+        lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
+        return i18n.get(key, lang, **kwargs)
 
     def auto_sync_new_products(self):
         """自动同步总部新增商品到代理（增强版：支持价格为0的商品预建记录 + 统一协议号分类）"""
