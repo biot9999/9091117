@@ -4871,6 +4871,19 @@ def gmaijilu(update: Update, context: CallbackContext):
     jilu_list = list(gmjlu.find({'user_id': df_id}, sort=[('timer', -1)], limit=10))
     total_count = gmjlu.count_documents({'user_id': df_id})
     keyboard = []
+    
+    # 获取最近订单时间用于"最后更新"
+    latest_update_time = '-'
+    if jilu_list:
+        first_order_timer = jilu_list[0].get('timer')
+        if isinstance(first_order_timer, str):
+            try:
+                timer_dt = datetime.strptime(first_order_timer, '%Y-%m-%d %H:%M:%S')
+                latest_update_time = timer_dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                latest_update_time = first_order_timer[:16] if len(first_order_timer) >= 16 else first_order_timer
+        elif isinstance(first_order_timer, datetime):
+            latest_update_time = first_order_timer.strftime("%Y-%m-%d %H:%M")
 
     for i in jilu_list:
         bianhao = i.get('bianhao', '无编号')
@@ -4879,15 +4892,15 @@ def gmaijilu(update: Update, context: CallbackContext):
         timer_value = i.get('timer')
         count = i.get('count', 1)
         
-        # 处理时间显示
+        # 处理时间显示 - 格式为 YYYY-MM-DD HH:MM
         if isinstance(timer_value, str):
             try:
                 timer_dt = datetime.strptime(timer_value, '%Y-%m-%d %H:%M:%S')
-                time_str = timer_dt.strftime("%m-%d %H:%M")
+                time_str = timer_dt.strftime("%Y-%m-%d %H:%M")
             except:
-                time_str = timer_value[:10] if len(timer_value) > 10 else timer_value
+                time_str = timer_value[:16] if len(timer_value) >= 16 else timer_value
         elif isinstance(timer_value, datetime):
-            time_str = timer_value.strftime("%m-%d %H:%M")
+            time_str = timer_value.strftime("%Y-%m-%d %H:%M")
         else:
             time_str = '未知时间'
 
@@ -4897,11 +4910,11 @@ def gmaijilu(update: Update, context: CallbackContext):
         else:
             display_name = projectname if lang == 'zh' else get_fy(projectname)
         
-        # 优化按钮显示格式 - 包含商品名、数量、类型、时间
+        # 优化按钮显示格式 - 商品名 | 数量:N | 时间:YYYY-MM-DD HH:MM
         if lang == 'zh':
-            title = f"{display_name} | 数量:{count} | {leixing} | {time_str}"
+            title = f"{display_name} | 数量:{count} | 时间:{time_str}"
         else:
-            title = f"{get_fy(display_name)} | Qty:{count} | {leixing} | {time_str}"
+            title = f"{get_fy(display_name)} | Qty:{count} | Time:{time_str}"
             
         keyboard.append([InlineKeyboardButton(title, callback_data=f'zcfshuo {bianhao}')])
 
@@ -4924,9 +4937,12 @@ def gmaijilu(update: Update, context: CallbackContext):
         if page_buttons:
             keyboard.append(page_buttons)
 
-    # 返回按钮
+    # 返回和主菜单按钮
     if lang == 'zh':
-        keyboard.append([InlineKeyboardButton('返回', callback_data=f'backgmjl {df_id}')])
+        keyboard.append([
+            InlineKeyboardButton('🔙 返回', callback_data=f'backgmjl {df_id}'),
+            InlineKeyboardButton('🏠 主菜单', callback_data='backstart')
+        ])
         
         # 优化后的购买记录标题
         if total_count > 0:
@@ -4937,7 +4953,7 @@ def gmaijilu(update: Update, context: CallbackContext):
 <b>记录概览</b>
 ├─ 总订单数: <code>{total_count}</code>
 ├─ 显示条数: <code>{min(10, len(jilu_list))}</code>
-└─ 最后更新: <code>{datetime.now().strftime("%m-%d %H:%M")}</code>
+└─ 最后更新: <code>{latest_update_time}</code>
 
 <b>操作说明</b>
 └─ 点击下方按钮查看或重新下载商品
@@ -4960,7 +4976,10 @@ def gmaijilu(update: Update, context: CallbackContext):
 
             '''.strip()
     else:
-        keyboard.append([InlineKeyboardButton('Return', callback_data=f'backgmjl {df_id}')])
+        keyboard.append([
+            InlineKeyboardButton('🔙 Return', callback_data=f'backgmjl {df_id}'),
+            InlineKeyboardButton('🏠 Main Menu', callback_data='backstart')
+        ])
         
         if total_count > 0:
             text = f'''
@@ -4970,7 +4989,7 @@ def gmaijilu(update: Update, context: CallbackContext):
 <b>Records Overview</b>
 ├─ Total Orders: <code>{total_count}</code>
 ├─ Showing: <code>{min(10, len(jilu_list))}</code>
-└─ Last Update: <code>{datetime.now().strftime("%m-%d %H:%M")}</code>
+└─ Last Update: <code>{latest_update_time}</code>
 
 <b>Instructions</b>
 └─ Click buttons below to view or re-download
@@ -5014,6 +5033,20 @@ def gmainext(update: Update, context: CallbackContext):
     keyboard = []
     text_list = []
     jilu_list = list(gmjlu.find({"user_id": df_id}, sort=[("timer", -1)], skip=int(page), limit=10))
+    
+    # 获取当前页最近订单时间用于"最后更新"
+    latest_update_time = '-'
+    if jilu_list:
+        first_order_timer = jilu_list[0].get('timer')
+        if isinstance(first_order_timer, str):
+            try:
+                timer_dt = datetime.strptime(first_order_timer, '%Y-%m-%d %H:%M:%S')
+                latest_update_time = timer_dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                latest_update_time = first_order_timer[:16] if len(first_order_timer) >= 16 else first_order_timer
+        elif isinstance(first_order_timer, datetime):
+            latest_update_time = first_order_timer.strftime("%Y-%m-%d %H:%M")
+    
     count = 1
     for i in jilu_list:
         bianhao = i.get('bianhao', '无编号')
@@ -5022,15 +5055,15 @@ def gmainext(update: Update, context: CallbackContext):
         timer_value = i.get('timer')
         count = i.get('count', 1)
         
-        # 处理时间显示
+        # 处理时间显示 - 格式为 YYYY-MM-DD HH:MM
         if isinstance(timer_value, str):
             try:
                 timer_dt = datetime.strptime(timer_value, '%Y-%m-%d %H:%M:%S')
-                time_str = timer_dt.strftime("%m-%d %H:%M")
+                time_str = timer_dt.strftime("%Y-%m-%d %H:%M")
             except:
-                time_str = timer_value[:10] if len(timer_value) > 10 else timer_value
+                time_str = timer_value[:16] if len(timer_value) >= 16 else timer_value
         elif isinstance(timer_value, datetime):
-            time_str = timer_value.strftime("%m-%d %H:%M")
+            time_str = timer_value.strftime("%Y-%m-%d %H:%M")
         else:
             time_str = '未知时间'
 
@@ -5040,11 +5073,11 @@ def gmainext(update: Update, context: CallbackContext):
         else:
             display_name = projectname if lang == 'zh' else get_fy(projectname)
         
-        # 优化按钮显示格式
+        # 优化按钮显示格式 - 商品名 | 数量:N | 时间:YYYY-MM-DD HH:MM
         if lang == 'zh':
-            title = f"{display_name} | 数量:{count} | {leixing} | {time_str}"
+            title = f"{display_name} | 数量:{count} | 时间:{time_str}"
         else:
-            title = f"{get_fy(display_name)} | Qty:{count} | {leixing} | {time_str}"
+            title = f"{get_fy(display_name)} | Qty:{count} | Time:{time_str}"
             
         keyboard.append([InlineKeyboardButton(title, callback_data=f'zcfshuo {bianhao}')])
         count += 1
@@ -5071,7 +5104,10 @@ def gmainext(update: Update, context: CallbackContext):
             
             keyboard.append(nav_buttons)
 
-        keyboard.append([InlineKeyboardButton('🔙 返回', callback_data=f'backgmjl {df_id}')])
+        keyboard.append([
+            InlineKeyboardButton('🔙 返回', callback_data=f'backgmjl {df_id}'),
+            InlineKeyboardButton('🏠 主菜单', callback_data='backstart')
+        ])
         
         text = f'''
 <b>购买记录</b> (第{current_page}页/共{total_pages}页)
@@ -5081,7 +5117,7 @@ def gmainext(update: Update, context: CallbackContext):
 ├─ 当前页面: <code>{current_page}/{total_pages}</code>
 ├─ 显示记录: <code>{len(jilu_list)}</code> 条
 ├─ 总记录数: <code>{total_count}</code> 条
-└─ 最后更新: <code>{datetime.now().strftime("%m-%d %H:%M")}</code>
+└─ 最后更新: <code>{latest_update_time}</code>
 
 <b>操作说明</b>
 └─ 点击商品按钮查看或重新下载
@@ -5112,7 +5148,10 @@ def gmainext(update: Update, context: CallbackContext):
             
             keyboard.append(nav_buttons)
 
-        keyboard.append([InlineKeyboardButton('🔙 Back', callback_data=f'backgmjl {df_id}')])
+        keyboard.append([
+            InlineKeyboardButton('🔙 Back', callback_data=f'backgmjl {df_id}'),
+            InlineKeyboardButton('🏠 Main Menu', callback_data='backstart')
+        ])
         
         text = f'''
 <b>Purchase Records</b> (Page {current_page}/{total_pages})
@@ -5122,7 +5161,7 @@ def gmainext(update: Update, context: CallbackContext):
 ├─ Current Page: <code>{current_page}/{total_pages}</code>
 ├─ Records Shown: <code>{len(jilu_list)}</code>
 ├─ Total Records: <code>{total_count}</code>
-└─ Last Update: <code>{datetime.now().strftime("%m-%d %H:%M")}</code>
+└─ Last Update: <code>{latest_update_time}</code>
 
 <b>Instructions</b>
 └─ Click product buttons to view or re-download
@@ -5238,6 +5277,113 @@ def zcfshuo(update: Update, context: CallbackContext):
     bianhao = query.data.replace('zcfshuo ', '')
 
     gmjlu_list = gmjlu.find_one({'bianhao': bianhao})
+    if not gmjlu_list:
+        error_msg = "❌ 订单不存在" if lang == 'zh' else "❌ Order not found"
+        query.edit_message_text(error_msg)
+        return
+    
+    # 提取订单信息
+    leixing = gmjlu_list.get('leixing', '未知类型')
+    projectname = gmjlu_list.get('projectname', '未知商品')
+    count = gmjlu_list.get('count', 1)
+    timer_value = gmjlu_list.get('timer')
+    df_id = gmjlu_list.get('user_id', user_id)
+    
+    # 处理时间显示 - 格式为 YYYY-MM-DD HH:MM
+    if isinstance(timer_value, str):
+        try:
+            timer_dt = datetime.strptime(timer_value, '%Y-%m-%d %H:%M:%S')
+            time_str = timer_dt.strftime("%Y-%m-%d %H:%M")
+        except:
+            time_str = timer_value[:16] if len(timer_value) >= 16 else timer_value
+    elif isinstance(timer_value, datetime):
+        time_str = timer_value.strftime("%Y-%m-%d %H:%M")
+    else:
+        time_str = '未知时间'
+    
+    # 商品名称处理
+    if projectname == '点击按钮修改':
+        display_name = '测试商品' if lang == 'zh' else 'Test Product'
+    else:
+        display_name = projectname if lang == 'zh' else get_fy(projectname)
+    
+    # 构建订单详情消息
+    if lang == 'zh':
+        detail_text = f'''
+<b>订单详情</b>
+
+
+<b>商品信息</b>
+├─ 商品名称: <code>{display_name}</code>
+├─ 数量: <code>{count}</code>
+├─ 分类: <code>{leixing}</code>
+└─ 订单号: <code>{bianhao}</code>
+
+<b>订单时间</b>
+└─ 购买时间: <code>{time_str}</code>
+
+<b>操作提示</b>
+└─ 点击下方按钮重新下载商品
+
+
+        '''.strip()
+        
+        # 构建按钮
+        keyboard = [
+            [InlineKeyboardButton('📥 重新下载', callback_data=f'redownload {bianhao}')],
+            [InlineKeyboardButton('🔙 返回订单列表', callback_data=f'gmaijilu {df_id}')]
+        ]
+    else:
+        detail_text = f'''
+<b>Order Details</b>
+
+
+<b>Product Information</b>
+├─ Product Name: <code>{display_name}</code>
+├─ Quantity: <code>{count}</code>
+├─ Category: <code>{leixing}</code>
+└─ Order Number: <code>{bianhao}</code>
+
+<b>Order Time</b>
+└─ Purchase Time: <code>{time_str}</code>
+
+<b>Instructions</b>
+└─ Click button below to re-download product
+
+
+        '''.strip()
+        
+        # 构建按钮
+        keyboard = [
+            [InlineKeyboardButton('📥 Re-download', callback_data=f'redownload {bianhao}')],
+            [InlineKeyboardButton('🔙 Back to Order List', callback_data=f'gmaijilu {df_id}')]
+        ]
+    
+    # 显示订单详情
+    try:
+        query.edit_message_text(
+            text=detail_text,
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logging.error(f"❌ 显示订单详情失败：{e}")
+
+
+def redownload(update: Update, context: CallbackContext):
+    """重新下载订单内容"""
+    query = update.callback_query
+    query.answer()
+    user_id = query.from_user.id
+    lang = user.find_one({'user_id': user_id})['lang']
+    bianhao = query.data.replace('redownload ', '')
+
+    gmjlu_list = gmjlu.find_one({'bianhao': bianhao})
+    if not gmjlu_list:
+        error_msg = "❌ 订单不存在" if lang == 'zh' else "❌ Order not found"
+        context.bot.send_message(chat_id=user_id, text=error_msg)
+        return
+        
     leixing = gmjlu_list['leixing']
 
     # API链接类的直接发送纯文本内容
@@ -5277,7 +5423,7 @@ def zcfshuo(update: Update, context: CallbackContext):
                 
             if os.path.exists(zip_filename):
                 with open(zip_filename, "rb") as f:
-                    query.message.reply_document(f)
+                    context.bot.send_document(chat_id=user_id, document=f)
             else:
                 error_msg = f"❌ 文件不存在：{zip_filename}" if lang == 'zh' else f"❌ File not found: {zip_filename}"
                 context.bot.send_message(chat_id=user_id, text=error_msg)
@@ -5289,6 +5435,7 @@ def zcfshuo(update: Update, context: CallbackContext):
         # 未知类型的处理
         error_msg = f"❌ 未知商品类型：{leixing}" if lang == 'zh' else f"❌ Unknown product type: {leixing}"
         context.bot.send_message(chat_id=user_id, text=error_msg)
+
 
 
 # 辅助函数：去除表情符号等特殊字符
@@ -14853,6 +15000,7 @@ def main():
     dispatcher.add_handler(CallbackQueryHandler(yhpage, pattern=r'^yhpage \d+$'))
     dispatcher.add_handler(CallbackQueryHandler(gmaijilu, pattern='gmaijilu'))
     dispatcher.add_handler(CallbackQueryHandler(zcfshuo, pattern='zcfshuo'))
+    dispatcher.add_handler(CallbackQueryHandler(redownload, pattern='redownload '))
     dispatcher.add_handler(CallbackQueryHandler(gmainext, pattern='gmainext '))
     # 添加页码信息处理器（不执行任何操作，只是防止错误）
     dispatcher.add_handler(CallbackQueryHandler(lambda update, context: update.callback_query.answer("页码信息" if user.find_one({'user_id': update.callback_query.from_user.id}).get('lang', 'zh') == 'zh' else "Page Info"), pattern='page_info'))
