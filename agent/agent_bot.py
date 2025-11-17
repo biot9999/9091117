@@ -3348,8 +3348,97 @@ class AgentBotHandlers:
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
-    def show_order_history(self, query):
-        self.safe_edit_message(query, "📊 订单历史功能暂未实现", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+    def show_order_history(self, query, page: int = 1):
+        """显示用户订单历史（分页）"""
+        uid = query.from_user.id
+        per_page = 10
+        skip = (page - 1) * per_page
+        
+        try:
+            # 获取订单集合
+            order_coll = self.config.get_agent_gmjlu_collection()
+            
+            # 查询用户的购买订单，按时间倒序
+            total_count = order_coll.count_documents({
+                'user_id': uid,
+                'leixing': 'purchase'
+            })
+            
+            if total_count == 0:
+                self.safe_edit_message(
+                    query,
+                    "📊 订单历史\n\n暂无购买记录",
+                    [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]],
+                    parse_mode=None
+                )
+                return
+            
+            # 查询当前页的订单
+            orders = list(order_coll.find({
+                'user_id': uid,
+                'leixing': 'purchase'
+            }).sort('timer', -1).skip(skip).limit(per_page))
+            
+            # 计算分页信息
+            total_pages = (total_count + per_page - 1) // per_page
+            
+            # 构建消息文本
+            text = f"📊 <b>订单历史</b>（第{page}/{total_pages}页）\n\n"
+            text += f"📦 共 {total_count} 笔订单\n\n"
+            
+            kb = []
+            for i, order in enumerate(orders, 1):
+                product_name = self._h(order.get('projectname', '未知商品'))
+                quantity = order.get('count', 1)
+                unit_price = float(order.get('ts', 0)) / max(quantity, 1)
+                total_amount = float(order.get('ts', 0))
+                order_time = order.get('timer', '未知时间')
+                order_id = order.get('bianhao', '无订单号')
+                
+                # 订单信息
+                text += f"<b>#{skip + i}</b>\n"
+                text += f"📦 商品：{product_name}\n"
+                text += f"🔢 数量：{quantity}\n"
+                text += f"💴 单价：{unit_price:.2f}U\n"
+                text += f"💰 总额：{total_amount:.2f}U\n"
+                text += f"🕒 时间：{order_time}\n"
+                text += f"📋 订单号：<code>{self._h(order_id)}</code>\n\n"
+                
+                # 查找商品的nowuid以支持"再次购买"
+                product = self.config.ejfl.find_one({'projectname': order.get('projectname')})
+                if product:
+                    nowuid = product.get('nowuid', '')
+                    kb.append([
+                        InlineKeyboardButton(
+                            f"🔄 再次购买 {product_name[:15]}",
+                            callback_data=f"product_{nowuid}"
+                        )
+                    ])
+            
+            # 分页按钮
+            pag = []
+            if page > 1:
+                pag.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"orders_page_{page-1}"))
+            if page < total_pages:
+                pag.append(InlineKeyboardButton("➡️ 下一页", callback_data=f"orders_page_{page+1}"))
+            if pag:
+                kb.append(pag)
+            
+            # 返回主菜单按钮
+            kb.append([InlineKeyboardButton("🏠 主菜单", callback_data="back_main")])
+            
+            self.safe_edit_message(query, text, kb, parse_mode='HTML')
+            
+        except Exception as e:
+            logger.error(f"显示订单历史失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.safe_edit_message(
+                query,
+                "❌ 加载订单历史失败",
+                [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]],
+                parse_mode=None
+            )
 
     # ========== 回调分发 ==========
     def button_callback(self, update: Update, context: CallbackContext):
@@ -3367,6 +3456,8 @@ class AgentBotHandlers:
                 self.show_recharge_options(q); q.answer(); return
             elif d == "orders":
                 self.show_order_history(q); q.answer(); return
+            elif d.startswith("orders_page_"):
+                self.show_order_history(q, int(d.replace("orders_page_",""))); q.answer(); return
             elif d == "support":
                 self.show_support_info(q); q.answer(); return
             elif d == "help":
