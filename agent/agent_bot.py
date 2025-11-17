@@ -2558,19 +2558,32 @@ class AgentBotHandlers:
 
     def show_main_menu(self, query):
         user = query.from_user
+        uid = user.id
+        
+        # Get user's language
+        lang = self.core.get_user_lang(uid)
+        
+        # Build menu based on user role
         kb = [
-            [InlineKeyboardButton("🛍️ 商品中心", callback_data="products"),
-             InlineKeyboardButton("👤 个人中心", callback_data="profile")],
-            [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
-             InlineKeyboardButton("📊 订单历史", callback_data="orders")]
+            [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
+             InlineKeyboardButton(self.core._t("menu_profile", uid), callback_data="profile")],
+            [InlineKeyboardButton(self.core._t("menu_recharge", uid), callback_data="recharge"),
+             InlineKeyboardButton(self.core._t("menu_orders", uid), callback_data="orders")]
         ]
+        
         if self.core.config.is_admin(user.id):
-            kb.append([InlineKeyboardButton("💰 价格管理", callback_data="price_management"),
-                       InlineKeyboardButton("📊 系统报表", callback_data="system_reports")])
-            kb.append([InlineKeyboardButton("💸 利润提现", callback_data="profit_center")])
-        kb.append([InlineKeyboardButton("📞 联系客服", callback_data="support"),
-                   InlineKeyboardButton("❓ 使用帮助", callback_data="help")])
-        text = f"🏠 主菜单\n\n当前时间: {self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')}"
+            kb.append([InlineKeyboardButton(self.core._t("menu_price_management", uid), callback_data="price_management"),
+                       InlineKeyboardButton(self.core._t("menu_system_reports", uid), callback_data="system_reports")])
+            kb.append([InlineKeyboardButton(self.core._t("menu_profit_center", uid), callback_data="profit_center")])
+        
+        kb.append([InlineKeyboardButton(self.core._t("menu_support", uid), callback_data="support"),
+                   InlineKeyboardButton(self.core._t("menu_help", uid), callback_data="help")])
+        
+        # Add language toggle button
+        current_lang_name = "中文" if lang == "zh" else "English"
+        kb.append([InlineKeyboardButton(f"{self.core._t('menu_toggle_language', uid)} ({current_lang_name})", callback_data="toggle_language")])
+        
+        text = f"{self.core._t('menu_back_main', uid)}\n\n{self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')}"
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def reload_admins_command(self, update: Update, context: CallbackContext):
@@ -2593,6 +2606,30 @@ class AgentBotHandlers:
             text = "⚠️ 管理员列表已重新加载，但当前无管理员配置"
         
         update.message.reply_text(text)
+    
+    def handle_toggle_language(self, query):
+        """Handle language toggle"""
+        uid = query.from_user.id
+        
+        # Get current language
+        current_lang = self.core.get_user_lang(uid)
+        
+        # Toggle language
+        new_lang = "en" if current_lang == "zh" else "zh"
+        
+        # Update user's language preference
+        success = self.core.set_user_lang(uid, new_lang)
+        
+        if success:
+            # Show success message in new language
+            lang_name = "English" if new_lang == "en" else "中文"
+            message = self.core._t("menu_toggle_language", uid) + f" → {lang_name}"
+            query.answer(message, show_alert=False)
+            
+            # Refresh main menu with new language
+            self.show_main_menu(query)
+        else:
+            query.answer("Failed to change language", show_alert=True)
 
     # ========== 利润中心 / 提现 ==========
     def show_profit_center(self, query):
@@ -3236,28 +3273,29 @@ class AgentBotHandlers:
         # 🔍 调试：打印查询结果
         logger.info(f"🔍 DEBUG: query result for user {uid} = {info}")
         if not info:
-            self.safe_edit_message(query, "❌ 用户信息不存在", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t("error_generic", uid), [[InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]], parse_mode=None)
             return
         
         avg = round(info.get('zgje', 0) / max(info.get('zgsl', 1), 1), 2)
-        level = '🥇 金牌' if info.get('zgje', 0) > 100 else '🥈 银牌' if info.get('zgje', 0) > 50 else '🥉 铜牌'
+        level_emoji = '🥇' if info.get('zgje', 0) > 100 else '🥈' if info.get('zgje', 0) > 50 else '🥉'
+        level_name = self.core._t("user_report_level_gold", uid) if info.get('zgje', 0) > 100 else self.core._t("user_report_level_silver", uid) if info.get('zgje', 0) > 50 else self.core._t("user_report_level_bronze", uid)
         
         text = (
-            f"👤 个人中心\n\n"
-            f"ID: {uid}\n"
-            f"内部ID: {self.H(info.get('count_id', '-'))}\n"
-            f"余额: {info.get('USDT', 0):.2f}U\n"
-            f"累计消费: {info.get('zgje', 0):.2f}U  次数:{info.get('zgsl', 0)}\n"
-            f"平均订单: {avg:.2f}U\n"
-            f"等级: {level}\n"
+            f"{self.core._t('profile_title', uid)}\n\n"
+            f"{self.core._t('profile_user_id', uid)}: {uid}\n"
+            f"Internal ID: {self.H(info.get('count_id', '-'))}\n"
+            f"{self.core._t('profile_balance', uid)}: {info.get('USDT', 0):.2f}U\n"
+            f"{self.core._t('profile_total_spent', uid)}: {info.get('zgje', 0):.2f}U  {self.core._t('profile_total_orders', uid)}:{info.get('zgsl', 0)}\n"
+            f"{self.core._t('sales_report_avg_order', uid)}: {avg:.2f}U\n"
+            f"Level: {level_emoji} {level_name}\n"
         )
         
         kb = [
-            [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
-             InlineKeyboardButton("📊 订单历史", callback_data="orders")],
-            [InlineKeyboardButton("🛍️ 商品中心", callback_data="products"),
-             InlineKeyboardButton("📞 联系客服", callback_data="support")],
-            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
+            [InlineKeyboardButton(self.core._t("menu_recharge", uid), callback_data="recharge"),
+             InlineKeyboardButton(self.core._t("menu_orders", uid), callback_data="orders")],
+            [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
+             InlineKeyboardButton(self.core._t("menu_support", uid), callback_data="support")],
+            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
         ]
         
         self.safe_edit_message(query, text, kb, parse_mode=None)
@@ -3855,6 +3893,10 @@ class AgentBotHandlers:
         d = q.data
         try:
             logger.info(f"[DEBUG] callback data: {d}")
+
+            # Language toggle
+            if d == "toggle_language":
+                self.handle_toggle_language(q); return
 
             # 基础导航
             if d == "products":
