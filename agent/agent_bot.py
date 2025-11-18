@@ -781,6 +781,44 @@ class AgentBotCore:
         """检查文本中是否包含中文字符"""
         import re
         return bool(re.search(r'[\u4e00-\u9fff]', text))
+    
+    def auto_translate(self, text: str, user_id: int = None) -> str:
+        """自动翻译任何包含中文的文本
+        
+        根据用户语言自动翻译文本：
+        - 如果用户语言是中文，返回原文
+        - 如果用户语言是英文且文本包含中文，使用 Google Translate 自动翻译
+        - 如果 Google Translate 不可用或失败，返回原文
+        
+        参数:
+            text: 要翻译的文本
+            user_id: 用户ID，用于获取语言偏好
+            
+        返回:
+            翻译后的文本（英文模式）或原文（中文模式）
+        """
+        lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
+        
+        # 如果是中文模式，直接返回原文
+        if lang == 'zh':
+            return text
+        
+        # 如果文本不包含中文，直接返回
+        if not self._contains_chinese(text):
+            return text
+        
+        # 英文模式：如果包含中文，尝试使用 Google Translate 翻译
+        if TRANSLATION_AVAILABLE:
+            try:
+                result = GOOGLE_TRANSLATOR.translate(text, src='zh-cn', dest='en')
+                if result and result.text:
+                    return result.text
+            except Exception as e:
+                # 翻译失败时记录日志但返回原文
+                logger.debug(f"Auto translate failed for '{text[:30]}...': {e}")
+        
+        # 如果翻译不可用或失败，返回原文
+        return text
 
 
     def auto_sync_new_products(self):
@@ -2803,9 +2841,11 @@ class AgentBotHandlers:
         }).sort('created_time', -1).limit(30)
         recs = list(recs)
         if not recs:
-            self.safe_edit_message(query, "📋 提现记录\n\n暂无申请", [[InlineKeyboardButton("🔙 返回", callback_data="profit_center")]], parse_mode=None)
+            uid = query.from_user.id
+            self.safe_edit_message(query, f"{self.core.auto_translate('📋 提现记录', uid)}\n\n{self.core.auto_translate('暂无申请', uid)}", [[InlineKeyboardButton(self.core._t("button_back", uid), callback_data="profit_center")]], parse_mode=None)
             return
-        text = "📋 提现记录（最新优先）\n\n"
+        uid = query.from_user.id
+        text = f"{self.core.auto_translate('📋 提现记录（最新优先）', uid)}\n\n"
         for r in recs:
             status = r.get('status')
             amount = r.get('amount', 0.0)
@@ -2813,15 +2853,15 @@ class AgentBotHandlers:
             created_s = self.core._to_beijing(created).strftime('%m-%d %H:%M') if created else '-'
             addr = str(r.get('withdrawal_address', ''))
             addr_short = f"{addr[:6]}...{addr[-6:]}" if len(addr) > 12 else addr
-            text += f"💰 {amount:.4f}U | {status}\n地址: {self.H(addr_short)} | 时间(京): {self.H(created_s)}\n"
+            text += f"💰 {amount:.4f}U | {status}\n{self.core.auto_translate('地址', uid)}: {self.H(addr_short)} | {self.core.auto_translate('时间(京)', uid)}: {self.H(created_s)}\n"
             if status == 'rejected' and r.get('reject_reason'):
-                text += f"原因: {self.H(r.get('reject_reason'))}\n"
+                text += f"{self.core.auto_translate('原因', uid)}: {self.H(r.get('reject_reason'))}\n"
             if status == 'completed' and r.get('tx_hash'):
                 th = str(r['tx_hash'])
                 text += f"Tx: {self.H(th[:12] + '...' if len(th) > 12 else th)}\n"
             text += "\n"
-        text += "（需人工审核/付款）"
-        self.safe_edit_message(query, text, [[InlineKeyboardButton("🔙 返回", callback_data="profit_center")]], parse_mode=None)
+        text += self.core.auto_translate("（需人工审核/付款）", uid)
+        self.safe_edit_message(query, text, [[InlineKeyboardButton(self.core._t("button_back", uid), callback_data="profit_center")]], parse_mode=None)
 
     # ========== 商品相关 ==========
     def show_product_categories(self, query):
@@ -3617,82 +3657,87 @@ class AgentBotHandlers:
         if not self.core.config.is_admin(uid):
             self.safe_edit_message(query, self.core._t('error_no_permission', uid), [[InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]], parse_mode=None)
             return
-        text = ("📊 系统报表中心\n\n"
-                "请选择需要查看的报表类型：")
+        text = (f"{self.core.auto_translate('📊 系统报表中心', uid)}\n\n"
+                f"{self.core.auto_translate('请选择需要查看的报表类型：', uid)}")
         kb = [
-            [InlineKeyboardButton("📈 销售报表(30天)", callback_data="report_sales_30"),
-             InlineKeyboardButton("👥 用户报表", callback_data="report_users")],
-            [InlineKeyboardButton("📦 商品报表", callback_data="report_products"),
-             InlineKeyboardButton("💰 财务报表(30天)", callback_data="report_financial_30")],
-            [InlineKeyboardButton("📊 综合概览", callback_data="report_overview_quick"),
-             InlineKeyboardButton("🔄 刷新数据", callback_data="system_reports")],
-            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
+            [InlineKeyboardButton(self.core.auto_translate("📈 销售报表(30天)", uid), callback_data="report_sales_30"),
+             InlineKeyboardButton(self.core.auto_translate("👥 用户报表", uid), callback_data="report_users")],
+            [InlineKeyboardButton(self.core.auto_translate("📦 商品报表", uid), callback_data="report_products"),
+             InlineKeyboardButton(self.core.auto_translate("💰 财务报表(30天)", uid), callback_data="report_financial_30")],
+            [InlineKeyboardButton(self.core.auto_translate("📊 综合概览", uid), callback_data="report_overview_quick"),
+             InlineKeyboardButton(self.core.auto_translate("🔄 刷新数据", uid), callback_data="system_reports")],
+            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_sales_report(self, query, days: int = 30):
+        uid = query.from_user.id
         s = self.core.get_sales_statistics(days)
-        text = (f"📈 销售报表（{days}天）\n"
-                f"总订单:{s['total_orders']}  总销售额:{s['total_revenue']:.2f}U  总销量:{s['total_quantity']}\n"
-                f"平均订单额:{s['avg_order_value']:.2f}U\n\n"
-                f"今日 订单:{s['today_orders']}  销售:{s['today_revenue']:.2f}U  量:{s['today_quantity']}\n\n"
-                "🏆 热销TOP5：\n")
+        text = (f"{self.core.auto_translate(f'📈 销售报表（{days}天）', uid)}\n"
+                f"{self.core.auto_translate('总订单', uid)}:{s['total_orders']}  {self.core.auto_translate('总销售额', uid)}:{s['total_revenue']:.2f}U  {self.core.auto_translate('总销量', uid)}:{s['total_quantity']}\n"
+                f"{self.core.auto_translate('平均订单额', uid)}:{s['avg_order_value']:.2f}U\n\n"
+                f"{self.core.auto_translate('今日', uid)} {self.core.auto_translate('订单', uid)}:{s['today_orders']}  {self.core.auto_translate('销售', uid)}:{s['today_revenue']:.2f}U  {self.core.auto_translate('量', uid)}:{s['today_quantity']}\n\n"
+                f"{self.core.auto_translate('🏆 热销TOP5：', uid)}\n")
         if s['popular_products']:
             for i,p in enumerate(s['popular_products'],1):
-                text += f"{i}. {self.H(p['_id'])}  数量:{p['total_sold']}  销售:{p['total_revenue']:.2f}U\n"
+                text += f"{i}. {self.H(p['_id'])}  {self.core.auto_translate('数量', uid)}:{p['total_sold']}  {self.core.auto_translate('销售', uid)}:{p['total_revenue']:.2f}U\n"
         else:
-            text += "暂无数据\n"
+            text += f"{self.core.auto_translate('暂无数据', uid)}\n"
         kb = [
-            [InlineKeyboardButton("📅 7天", callback_data="report_sales_7"),
-             InlineKeyboardButton("📅 30天", callback_data="report_sales_30"),
-             InlineKeyboardButton("📅 90天", callback_data="report_sales_90")],
-            [InlineKeyboardButton("🔄 刷新", callback_data=f"report_sales_{days}"),
-             InlineKeyboardButton("🔙 返回报表", callback_data="system_reports")]
+            [InlineKeyboardButton(self.core.auto_translate("📅 7天", uid), callback_data="report_sales_7"),
+             InlineKeyboardButton(self.core.auto_translate("📅 30天", uid), callback_data="report_sales_30"),
+             InlineKeyboardButton(self.core.auto_translate("📅 90天", uid), callback_data="report_sales_90")],
+            [InlineKeyboardButton(self.core.auto_translate("🔄 刷新", uid), callback_data=f"report_sales_{days}"),
+             InlineKeyboardButton(self.core.auto_translate("🔙 返回报表", uid), callback_data="system_reports")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_user_report(self, query):
+        uid = query.from_user.id
         st = self.core.get_user_statistics()
-        text = (f"👥 用户统计报表\n"
-                f"总:{st['total_users']}  活跃:{st['active_users']}  今日新增:{st['today_new_users']}  活跃率:{st['activity_rate']}%\n"
-                f"余额总:{st['total_balance']:.2f}U  平均:{st['avg_balance']:.2f}U  消费总:{st['total_spent']:.2f}U\n"
-                f"等级分布  铜:{st['spending_levels']['bronze']}  银:{st['spending_levels']['silver']}  金:{st['spending_levels']['gold']}")
-        kb=[[InlineKeyboardButton("🔄 刷新", callback_data="report_users"),
-             InlineKeyboardButton("🔙 返回报表", callback_data="system_reports")]]
+        text = (f"{self.core.auto_translate('👥 用户统计报表', uid)}\n"
+                f"{self.core.auto_translate('总', uid)}:{st['total_users']}  {self.core.auto_translate('活跃', uid)}:{st['active_users']}  {self.core.auto_translate('今日新增', uid)}:{st['today_new_users']}  {self.core.auto_translate('活跃率', uid)}:{st['activity_rate']}%\n"
+                f"{self.core.auto_translate('余额总', uid)}:{st['total_balance']:.2f}U  {self.core.auto_translate('平均', uid)}:{st['avg_balance']:.2f}U  {self.core.auto_translate('消费总', uid)}:{st['total_spent']:.2f}U\n"
+                f"{self.core.auto_translate('等级分布', uid)}  {self.core.auto_translate('铜', uid)}:{st['spending_levels']['bronze']}  {self.core.auto_translate('银', uid)}:{st['spending_levels']['silver']}  {self.core.auto_translate('金', uid)}:{st['spending_levels']['gold']}")
+        kb=[[InlineKeyboardButton(self.core.auto_translate("🔄 刷新", uid), callback_data="report_users"),
+             InlineKeyboardButton(self.core.auto_translate("🔙 返回报表", uid), callback_data="system_reports")]]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_overview_report(self, query):
+        uid = query.from_user.id
         s = self.core.get_sales_statistics(30)
         u = self.core.get_user_statistics()
-        text = (f"📊 系统概览报表(30天)\n\n"
-                f"用户:{u['total_users']}  活跃:{u['active_users']}  今日新增:{u['today_new_users']}\n"
-                f"订单:{s['total_orders']}  销售:{s['total_revenue']:.2f}U  今日:{s['today_revenue']:.2f}U\n"
-                f"平均订单额:{s['avg_order_value']:.2f}U  活跃率:{u['activity_rate']}%")
-        kb=[[InlineKeyboardButton("🔄 刷新", callback_data="report_overview_quick"),
-             InlineKeyboardButton("🔙 返回报表", callback_data="system_reports")]]
+        text = (f"{self.core.auto_translate('📊 系统概览报表(30天)', uid)}\n\n"
+                f"{self.core.auto_translate('用户', uid)}:{u['total_users']}  {self.core.auto_translate('活跃', uid)}:{u['active_users']}  {self.core.auto_translate('今日新增', uid)}:{u['today_new_users']}\n"
+                f"{self.core.auto_translate('订单', uid)}:{s['total_orders']}  {self.core.auto_translate('销售', uid)}:{s['total_revenue']:.2f}U  {self.core.auto_translate('今日', uid)}:{s['today_revenue']:.2f}U\n"
+                f"{self.core.auto_translate('平均订单额', uid)}:{s['avg_order_value']:.2f}U  {self.core.auto_translate('活跃率', uid)}:{u['activity_rate']}%")
+        kb=[[InlineKeyboardButton(self.core.auto_translate("🔄 刷新", uid), callback_data="report_overview_quick"),
+             InlineKeyboardButton(self.core.auto_translate("🔙 返回报表", uid), callback_data="system_reports")]]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_product_report(self, query):
+        uid = query.from_user.id
         p = self.core.get_product_statistics()
-        text = (f"📦 商品统计报表\n"
-                f"商品:{p['total_products']}  启用:{p['active_products']}  禁用:{p['inactive_products']}\n"
-                f"库存:{p['total_stock']}  已售:{p['sold_stock']}  周转率:{p['stock_turnover_rate']}%\n"
-                f"平均利润率:{p['avg_profit_rate']}%  最高:{p['highest_profit_rate']}%  最低:{p['lowest_profit_rate']}%")
-        kb=[[InlineKeyboardButton("🔄 刷新", callback_data="report_products"),
-             InlineKeyboardButton("🔙 返回报表", callback_data="system_reports")]]
+        text = (f"{self.core.auto_translate('📦 商品统计报表', uid)}\n"
+                f"{self.core.auto_translate('商品', uid)}:{p['total_products']}  {self.core.auto_translate('启用', uid)}:{p['active_products']}  {self.core.auto_translate('禁用', uid)}:{p['inactive_products']}\n"
+                f"{self.core.auto_translate('库存', uid)}:{p['total_stock']}  {self.core.auto_translate('已售', uid)}:{p['sold_stock']}  {self.core.auto_translate('周转率', uid)}:{p['stock_turnover_rate']}%\n"
+                f"{self.core.auto_translate('平均利润率', uid)}:{p['avg_profit_rate']}%  {self.core.auto_translate('最高', uid)}:{p['highest_profit_rate']}%  {self.core.auto_translate('最低', uid)}:{p['lowest_profit_rate']}%")
+        kb=[[InlineKeyboardButton(self.core.auto_translate("🔄 刷新", uid), callback_data="report_products"),
+             InlineKeyboardButton(self.core.auto_translate("🔙 返回报表", uid), callback_data="system_reports")]]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_financial_report(self, query, days: int = 30):
+        uid = query.from_user.id
         f = self.core.get_financial_statistics(days)
-        text = (f"💰 财务报表（{days}天）\n"
-                f"总收入:{f['total_revenue']:.2f}U  订单数:{f['order_count']}  平均订单:{f['avg_order_value']:.2f}U\n"
-                f"预估利润:{f['estimated_profit']:.2f}U  利润率:{f['profit_margin']}%")
+        text = (f"{self.core.auto_translate(f'💰 财务报表（{days}天）', uid)}\n"
+                f"{self.core.auto_translate('总收入', uid)}:{f['total_revenue']:.2f}U  {self.core.auto_translate('订单数', uid)}:{f['order_count']}  {self.core.auto_translate('平均订单', uid)}:{f['avg_order_value']:.2f}U\n"
+                f"{self.core.auto_translate('预估利润', uid)}:{f['estimated_profit']:.2f}U  {self.core.auto_translate('利润率', uid)}:{f['profit_margin']}%")
         kb = [
-            [InlineKeyboardButton("📅 7天", callback_data="report_financial_7"),
-             InlineKeyboardButton("📅 30天", callback_data="report_financial_30"),
-             InlineKeyboardButton("📅 90天", callback_data="report_financial_90")],
-            [InlineKeyboardButton("🔄 刷新", callback_data=f"report_financial_{days}"),
-             InlineKeyboardButton("🔙 返回报表", callback_data="system_reports")]
+            [InlineKeyboardButton(self.core.auto_translate("📅 7天", uid), callback_data="report_financial_7"),
+             InlineKeyboardButton(self.core.auto_translate("📅 30天", uid), callback_data="report_financial_30"),
+             InlineKeyboardButton(self.core.auto_translate("📅 90天", uid), callback_data="report_financial_90")],
+            [InlineKeyboardButton(self.core.auto_translate("🔄 刷新", uid), callback_data=f"report_financial_{days}"),
+             InlineKeyboardButton(self.core.auto_translate("🔙 返回报表", uid), callback_data="system_reports")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
