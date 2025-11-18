@@ -801,16 +801,16 @@ class AgentBotCore:
             
             if cached and cached.get('fanyi'):
                 # 缓存命中
-                logger.debug(f"✅ Cache hit for '{text[:50]}...'")
+                logger.info(f"✅ Translation cache hit for '{text[:30]}...'")
                 return cached['fanyi']
             
             # 缓存未命中，调用翻译器
-            logger.debug(f"🔄 Translating '{text[:50]}...'")
+            logger.info(f"🔄 Translating '{text[:30]}...'")
             translated = self.config.auto_translator.translate(text)
             
             # 如果翻译失败（返回原文），不缓存
             if translated == text:
-                logger.debug(f"⚠️ Translation returned original text for '{text[:50]}...'")
+                logger.warning(f"⚠️ Translation returned original text for '{text[:30]}...'")
                 return text
             
             # 存入缓存
@@ -827,7 +827,7 @@ class AgentBotCore:
                     },
                     upsert=True
                 )
-                logger.debug(f"✅ Cached translation for '{text[:50]}...'")
+                logger.info(f"✅ Cached translation: '{text[:30]}...' -> '{translated[:30]}...'")
             except Exception as cache_err:
                 logger.warning(f"⚠️ Failed to cache translation: {cache_err}")
             
