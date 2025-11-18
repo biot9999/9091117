@@ -719,6 +719,40 @@ class AgentBotCore:
         """
         lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
         return i18n.get(key, lang, **kwargs)
+    
+    def translate_product_name(self, product_name: str, user_id: int = None) -> str:
+        """Translate product name by replacing country names
+        
+        将商品名称中的国家名翻译为用户选择的语言
+        例如: "墨西哥🇲🇽+52" -> "Mexico🇲🇽+52" (英文)
+        """
+        lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
+        
+        # 如果是中文，直接返回原名称
+        if lang == 'zh':
+            return product_name
+        
+        # 英文模式：替换所有已知的国家名
+        translated_name = product_name
+        
+        # 构建国家名映射表（中文 -> 英文）
+        country_mapping = {}
+        for key in i18n.translations.get('zh', {}).keys():
+            if key.startswith('country_'):
+                zh_name = i18n.get(key, 'zh')
+                en_name = i18n.get(key, 'en')
+                if zh_name and en_name and zh_name != en_name:
+                    country_mapping[zh_name] = en_name
+        
+        # 按长度降序排序，确保先匹配较长的国家名（避免部分匹配问题）
+        sorted_countries = sorted(country_mapping.items(), key=lambda x: len(x[0]), reverse=True)
+        
+        # 替换所有匹配的国家名
+        for zh_name, en_name in sorted_countries:
+            translated_name = translated_name.replace(zh_name, en_name)
+        
+        return translated_name
+
 
     def auto_sync_new_products(self):
         """自动同步总部新增商品到代理（增强版：支持价格为0的商品预建记录 + 统一协议号分类）"""
@@ -2651,24 +2685,24 @@ class AgentBotHandlers:
             return
         s = self.core.get_profit_summary()
         refresh_time = self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')
-        text = f"""💸 <b>利润中心</b>
+        text = f"""<b>{self.core._t('profit_center_title', uid)}</b>
 
-累计利润: {s['total_profit']:.2f} USDT
-已提现: {s['withdrawn_profit']:.2f} USDT
-待审核: {s['pending_profit']:.2f} USDT
-可提现: {s['available_profit']:.2f} USDT
-待处理申请: {s['request_count_pending']} 笔
+{self.core._t('profit_center_total_profit', uid)}: {s['total_profit']:.2f} USDT
+{self.core._t('profit_center_withdrawn', uid)}: {s['withdrawn_profit']:.2f} USDT
+{self.core._t('profit_center_pending', uid)}: {s['pending_profit']:.2f} USDT
+{self.core._t('profit_center_available', uid)}: {s['available_profit']:.2f} USDT
+{self.core._t('profit_center_request_count', uid)}: {s['request_count_pending']} {self.core._t('profit_center_requests_unit', uid)}
 
 
-刷新时间: {refresh_time}
+{self.core._t('profit_center_refresh_time', uid)}: {refresh_time}
 
-• 审核/付款需人工处理
+{self.core._t('profit_center_manual_note', uid)}
 """
         kb = [
-            [InlineKeyboardButton("📝 申请提现", callback_data="profit_withdraw"),
-             InlineKeyboardButton("📋 申请记录", callback_data="profit_withdraw_list")],
-            [InlineKeyboardButton("🔄 刷新", callback_data="profit_center"),
-             InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]
+            [InlineKeyboardButton(self.core._t('profit_center_apply_withdraw', uid), callback_data="profit_withdraw"),
+             InlineKeyboardButton(self.core._t('profit_center_withdraw_history', uid), callback_data="profit_withdraw_list")],
+            [InlineKeyboardButton(self.core._t('profit_center_refresh', uid), callback_data="profit_center"),
+             InlineKeyboardButton(self.core._t('profit_center_main_menu', uid), callback_data="back_main")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=ParseMode.HTML)
 
@@ -2932,12 +2966,14 @@ class AgentBotHandlers:
                     kb = []
                     for p in products_with_stock:
                         name = p.get('projectname')
+                        # Translate product name based on user language
+                        translated_name = self.core.translate_product_name(name, uid)
                         nowuid = p.get('nowuid')
                         price = p['price']
                         stock = p['stock']
                         
                         # ✅ 按钮格式 - use translation for format
-                        button_text = self.core._t('product_list_item_format', uid, name=name, price=price, stock=stock)
+                        button_text = self.core._t('product_list_item_format', uid, name=translated_name, price=price, stock=stock)
                         kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
                     
                     # 如果没有有库存的商品
@@ -3032,12 +3068,14 @@ class AgentBotHandlers:
             kb = []
             for p in products_with_stock:
                 name = p.get('projectname')
+                # Translate product name based on user language
+                translated_name = self.core.translate_product_name(name, uid)
                 nowuid = p.get('nowuid')
                 price = p['price']
                 stock = p['stock']
                 
                 # ✅ 按钮格式 - use translation for format
-                button_text = self.core._t('product_list_item_format', uid, name=name, price=price, stock=stock)
+                button_text = self.core._t('product_list_item_format', uid, name=translated_name, price=price, stock=stock)
                 kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
             
             # 如果没有有库存的商品
@@ -3425,11 +3463,13 @@ class AgentBotHandlers:
         if not prods:
             self.safe_edit_message(query, self.core._t('price_no_products', uid), [[InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]], parse_mode=None)
             return
-        text = f"💰 价格管理（第{page}页）\n\n"
+        text = f"{self.core._t('price_management_title', uid, page=page)}\n\n"
         kb = []
         for p in prods:
             info = p['product_info'][0] if p['product_info'] else {}
             name = info.get('projectname', 'N/A')
+            # Translate product name based on user language
+            translated_name = self.core.translate_product_name(name, uid)
             nowuid = p.get('original_nowuid', '')
             
             # ✅ 实时获取总部价格
@@ -3445,28 +3485,35 @@ class AgentBotHandlers:
             profit_rate = (agent_markup / origin_price * 100) if origin_price else 0
             
             stock = self.core.get_product_stock(nowuid)
-            text += f"{self.H(name)}\n总部:{origin_price}U  加价:{agent_markup:.2f}U  代理价:{agent_price}U  利润率:{profit_rate:.1f}%  库:{stock}\n\n"
-            kb.append([InlineKeyboardButton(f"📝 {name[:18]}", callback_data=f"edit_price_{nowuid}")])
+            text += (f"{self.H(translated_name)}\n"
+                    f"{self.core._t('price_mgmt_hq_label', uid)}:{origin_price}U  "
+                    f"{self.core._t('price_mgmt_markup_label', uid)}:{agent_markup:.2f}U  "
+                    f"{self.core._t('price_mgmt_agent_price_label', uid)}:{agent_price}U  "
+                    f"{self.core._t('price_mgmt_profit_rate_label', uid)}:{profit_rate:.1f}%  "
+                    f"{self.core._t('price_mgmt_stock_label', uid)}:{stock}\n\n")
+            # Use translated name for button too (shortened)
+            kb.append([InlineKeyboardButton(f"📝 {translated_name[:18]}", callback_data=f"edit_price_{nowuid}")])
         pag = []
         if page > 1:
-            pag.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"price_page_{page-1}"))
+            pag.append(InlineKeyboardButton(self.core._t('price_mgmt_prev_page', uid), callback_data=f"price_page_{page-1}"))
         if res['current_page'] < res['total_pages']:
-            pag.append(InlineKeyboardButton("➡️ 下一页", callback_data=f"price_page_{page+1}"))
+            pag.append(InlineKeyboardButton(self.core._t('price_mgmt_next_page', uid), callback_data=f"price_page_{page+1}"))
         if pag:
             kb.append(pag)
-        kb.append([InlineKeyboardButton("🏠 主菜单", callback_data="back_main")])
+        kb.append([InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")])
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_price_edit(self, query, nowuid: str):
+        uid = query.from_user.id
         prod = self.core.config.ejfl.find_one({'nowuid': nowuid})
         if not prod:
-            self.safe_edit_message(query, "❌ 商品不存在", [[InlineKeyboardButton("🔙 返回", callback_data="price_management")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('price_edit_product_not_exist', uid), [[InlineKeyboardButton(self.core._t('button_back', uid), callback_data="price_management")]], parse_mode=None)
             return
         ap_info = self.core.config.agent_product_prices.find_one({
             'agent_bot_id': self.core.config.AGENT_BOT_ID, 'original_nowuid': nowuid
         })
         if not ap_info:
-            self.safe_edit_message(query, "❌ 代理价格配置不存在", [[InlineKeyboardButton("🔙 返回", callback_data="price_management")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('price_edit_config_not_exist', uid), [[InlineKeyboardButton(self.core._t('button_back', uid), callback_data="price_management")]], parse_mode=None)
             return
         
         # ✅ 实时获取总部价格
@@ -3482,34 +3529,37 @@ class AgentBotHandlers:
         profit_rate = (agent_markup / op * 100) if op > 0 else 0
         
         stock = self.core.get_product_stock(nowuid)
-        text = f"""📝 编辑商品价格
+        # Translate product name based on user language
+        translated_name = self.core.translate_product_name(prod['projectname'], uid)
+        text = f"""{self.core._t('price_edit_title_label', uid)}
 
-🏷️ 商品: {self.H(prod['projectname'])}
-📦 库存: {stock}
-💼 编号: {self.H(nowuid)}
+{self.core._t('price_edit_product_label', uid)}: {self.H(translated_name)}
+{self.core._t('price_edit_stock_label', uid)}: {stock}
+{self.core._t('price_edit_id_label', uid)}: {self.H(nowuid)}
 
-💰 当前价格:
-• 总部: {op}U
-• 加价: {agent_markup:.2f}U
-• 代理价: {agent_price:.2f}U
-• 利润率: {profit_rate:.1f}%
+{self.core._t('price_edit_current_price_label', uid)}
+• {self.core._t('price_edit_hq_label', uid)}: {op}U
+• {self.core._t('price_edit_markup_label', uid)}: {agent_markup:.2f}U
+• {self.core._t('price_edit_agent_price_label', uid)}: {agent_price:.2f}U
+• {self.core._t('price_edit_profit_rate_label', uid)}: {profit_rate:.1f}%
 
-请直接发送新的代理价格数字，例如: {op + 0.2:.2f}
+{self.core._t('price_edit_prompt', uid, example=f'{op + 0.2:.2f}')}
 """
         self.user_states[query.from_user.id] = {'state': 'waiting_price', 'product_nowuid': nowuid, 'original_price': op}
         kb = [
-            [InlineKeyboardButton("🔄 切换状态", callback_data=f"toggle_status_{nowuid}"),
-             InlineKeyboardButton("📊 利润预算", callback_data=f"profit_calc_{nowuid}")],
-            [InlineKeyboardButton("🔙 返回管理", callback_data="price_management")]
+            [InlineKeyboardButton(self.core._t('price_edit_toggle_status', uid), callback_data=f"toggle_status_{nowuid}"),
+             InlineKeyboardButton(self.core._t('price_edit_profit_calc_btn', uid), callback_data=f"profit_calc_{nowuid}")],
+            [InlineKeyboardButton(self.core._t('price_edit_back_mgmt', uid), callback_data="price_management")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=ParseMode.HTML)
 
     def show_profit_calculator(self, query, nowuid: str):
+        uid = query.from_user.id
         ap_info = self.core.config.agent_product_prices.find_one({
             'agent_bot_id': self.core.config.AGENT_BOT_ID, 'original_nowuid': nowuid
         })
         if not ap_info:
-            self.safe_edit_message(query, "❌ 商品不存在", [[InlineKeyboardButton("🔙 返回", callback_data="price_management")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('price_edit_product_not_exist', uid), [[InlineKeyboardButton(self.core._t('button_back', uid), callback_data="price_management")]], parse_mode=None)
             return
         
         # ✅ 实时获取总部价格
@@ -3517,7 +3567,9 @@ class AgentBotHandlers:
         op = float(prod.get('money', 0)) if prod else 0
         
         name = ap_info.get('product_name', 'N/A')
-        text = f"📊 利润计算器 - {self.H(name)}\n总部: {op}U（实时价格）\n\n"
+        # Translate product name based on user language
+        translated_name = self.core.translate_product_name(name, uid)
+        text = f"{self.core._t('profit_calc_title', uid, name=self.H(translated_name))}\n{self.core._t('profit_calc_hq_label', uid, price=op)}\n\n"
         kb = []
         
         for rate in [10, 20, 30, 50, 80, 100]:
@@ -3525,10 +3577,10 @@ class AgentBotHandlers:
             new_markup = round(op * rate / 100, 2)
             # ✅ 实时计算代理价格
             new_agent_price = round(op + new_markup, 2)
-            text += f"{rate}% → {new_agent_price:.2f}U (加价:{new_markup:.2f})\n"
-            kb.append([InlineKeyboardButton(f"设置 {rate}%({new_agent_price})", callback_data=f"set_price_{nowuid}_{new_agent_price}")])
+            text += self.core._t('profit_calc_rate_format', uid, rate=rate, agent_price=f"{new_agent_price:.2f}", markup=f"{new_markup:.2f}") + "\n"
+            kb.append([InlineKeyboardButton(self.core._t('profit_calc_set_btn', uid, rate=rate, price=new_agent_price), callback_data=f"set_price_{nowuid}_{new_agent_price}")])
         
-        kb.append([InlineKeyboardButton("🔙 返回编辑", callback_data=f"edit_price_{nowuid}")])
+        kb.append([InlineKeyboardButton(self.core._t('profit_calc_back_edit', uid), callback_data=f"edit_price_{nowuid}")])
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_system_reports(self, query):
