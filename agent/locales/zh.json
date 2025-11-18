@@ -25,6 +25,9 @@
   "products_items": "个商品",
   "products_no_categories": "❌ 暂无商品分类",
   
+  "categories_button_format": "{name}  [{count}个]",
+  "products_button_format": "{name} {price}U   [{stock}个]",
+  
   "category_products_title": "📦 {category}",
   "category_products_page": "第{page}页",
   "category_products_price": "价格",

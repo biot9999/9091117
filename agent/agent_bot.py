@@ -34,6 +34,16 @@ from html import escape as html_escape
 from pathlib import Path
 from io import BytesIO
 from typing import Union
+
+# Auto translate module
+try:
+    from .auto_translate import AutoTranslator
+except ImportError:
+    # Fallback for direct execution
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from auto_translate import AutoTranslator
+
 # 二维码与图片
 try:
     import qrcode
@@ -330,6 +340,28 @@ class AgentBotConfig:
         self.SUPPORT_CONTACT_USERNAME = os.getenv("SUPPORT_CONTACT_USERNAME", "9haokf")
         self.SUPPORT_CONTACT_URL = os.getenv("SUPPORT_CONTACT_URL") or f"https://t.me/{self.SUPPORT_CONTACT_USERNAME}"
         self.SUPPORT_CONTACT_DISPLAY = os.getenv("SUPPORT_CONTACT_DISPLAY")
+        
+        # ✅ 自动翻译配置
+        self.AUTO_TRANSLATE_ENABLED = os.getenv("AUTO_TRANSLATE_ENABLED", "0") in ("1", "true", "True")
+        self.AUTO_TRANSLATE_PROVIDER = os.getenv("AUTO_TRANSLATE_PROVIDER", "libre")
+        self.LIBRETRANSLATE_ENDPOINT = os.getenv("LIBRETRANSLATE_ENDPOINT", "https://libretranslate.com")
+        self.LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY")
+        
+        # 初始化自动翻译器
+        if self.AUTO_TRANSLATE_ENABLED:
+            try:
+                self.auto_translator = AutoTranslator(
+                    provider=self.AUTO_TRANSLATE_PROVIDER,
+                    endpoint=self.LIBRETRANSLATE_ENDPOINT,
+                    api_key=self.LIBRETRANSLATE_API_KEY
+                )
+                logger.info(f"✅ 自动翻译已启用: provider={self.AUTO_TRANSLATE_PROVIDER}")
+            except Exception as e:
+                logger.error(f"❌ 初始化自动翻译器失败: {e}")
+                self.auto_translator = None
+        else:
+            self.auto_translator = None
+            logger.info("ℹ️ 自动翻译已禁用")
 
         try:
             self.client = MongoClient(self.MONGODB_URI)
@@ -344,6 +376,7 @@ class AgentBotConfig:
             self.agent_profit_account = self.db['agent_profit_account']
             self.withdrawal_requests = self.db['withdrawal_requests']
             self.recharge_orders = self.db['recharge_orders']
+            self.fyb = self.db['fyb']  # ✅ 翻译缓存表
         except Exception as e:
             logger.error(f"❌ 数据库连接失败: {e}")
             raise
@@ -719,6 +752,90 @@ class AgentBotCore:
         """
         lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
         return i18n.get(key, lang, **kwargs)
+    
+    def translate_cached(self, user_id: int, text: str) -> str:
+        """
+        翻译动态文本（带缓存）
+        
+        仅在以下条件同时满足时翻译：
+        1. AUTO_TRANSLATE_ENABLED 为 True
+        2. 用户语言为 'en'
+        
+        翻译流程：
+        1. 查询 fyb 集合中的缓存
+        2. 如果未缓存，调用 auto_translator.translate()
+        3. 将翻译结果存入 fyb 集合
+        4. 返回翻译结果或原文（失败时）
+        
+        Args:
+            user_id: 用户ID（用于获取语言偏好）
+            text: 要翻译的文本
+        
+        Returns:
+            翻译后的文本（英文），或原文本（失败/未启用/非英文用户）
+        """
+        # 检查是否需要翻译
+        if not self.config.AUTO_TRANSLATE_ENABLED:
+            return text
+        
+        user_lang = self.get_user_lang(user_id)
+        if user_lang != 'en':
+            return text
+        
+        if not text or not text.strip():
+            return text
+        
+        # 检查翻译器是否可用
+        if not self.config.auto_translator:
+            logger.warning("⚠️ Auto translator not initialized, returning original text")
+            return text
+        
+        try:
+            # 查询缓存
+            cache_key = {
+                'text': text,
+                'language': 'en'
+            }
+            
+            cached = self.config.fyb.find_one(cache_key)
+            
+            if cached and cached.get('fanyi'):
+                # 缓存命中
+                logger.debug(f"✅ Cache hit for '{text[:50]}...'")
+                return cached['fanyi']
+            
+            # 缓存未命中，调用翻译器
+            logger.debug(f"🔄 Translating '{text[:50]}...'")
+            translated = self.config.auto_translator.translate(text)
+            
+            # 如果翻译失败（返回原文），不缓存
+            if translated == text:
+                logger.debug(f"⚠️ Translation returned original text for '{text[:50]}...'")
+                return text
+            
+            # 存入缓存
+            try:
+                self.config.fyb.update_one(
+                    cache_key,
+                    {
+                        '$set': {
+                            'text': text,
+                            'fanyi': translated,
+                            'language': 'en',
+                            'created_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        }
+                    },
+                    upsert=True
+                )
+                logger.debug(f"✅ Cached translation for '{text[:50]}...'")
+            except Exception as cache_err:
+                logger.warning(f"⚠️ Failed to cache translation: {cache_err}")
+            
+            return translated
+            
+        except Exception as e:
+            logger.error(f"❌ Translation failed for '{text[:50]}...': {e}")
+            return text
 
     def auto_sync_new_products(self):
         """自动同步总部新增商品到代理（增强版：支持价格为0的商品预建记录 + 统一协议号分类）"""
@@ -2778,8 +2895,15 @@ class AgentBotHandlers:
             
             kb = []
             for cat in categories:
-                button_text = f"{cat['_id']}  [{cat['stock']}{self.core._t('products_items', uid)}]"
-                kb.append([InlineKeyboardButton(button_text, callback_data=f"category_{cat['_id']}")])
+                # ✅ 翻译分类名称（如果启用且用户语言为英文）
+                cat_name = cat['_id']
+                translated_name = self.core.translate_cached(uid, cat_name)
+                
+                # ✅ 使用 i18n 格式化按钮文本
+                button_text = self.core._t('categories_button_format', uid, 
+                                          name=translated_name, 
+                                          count=cat['stock'])
+                kb.append([InlineKeyboardButton(button_text, callback_data=f"category_{cat_name}")])
             
             kb.append([InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")])
             
@@ -2920,6 +3044,7 @@ class AgentBotHandlers:
                 
                 # 如果HQ克隆模式成功，直接渲染
                 if products_with_stock is not None:
+                    uid = query.from_user.id
                     text = (
                         "<b>🛒 这是商品列表  选择你需要的分类：</b>\n\n"
                         "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。\n\n"
@@ -2934,8 +3059,14 @@ class AgentBotHandlers:
                         price = p['price']
                         stock = p['stock']
                         
-                        # ✅ 按钮格式
-                        button_text = f"{name} {price}U   [{stock}个]"
+                        # ✅ 翻译产品名称（如果启用且用户语言为英文）
+                        translated_name = self.core.translate_cached(uid, name)
+                        
+                        # ✅ 使用 i18n 格式化按钮文本
+                        button_text = self.core._t('products_button_format', uid,
+                                                   name=translated_name,
+                                                   price=price,
+                                                   stock=stock)
                         kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
                     
                     # 如果没有有库存的商品
@@ -3019,6 +3150,7 @@ class AgentBotHandlers:
             products_with_stock.sort(key=lambda x: -x['stock'])
             
             # ✅ 文本格式
+            uid = query.from_user.id
             text = (
                 "<b>🛒 这是商品列表  选择你需要的分类：</b>\n\n"
                 "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。\n\n"
@@ -3033,8 +3165,14 @@ class AgentBotHandlers:
                 price = p['price']
                 stock = p['stock']
                 
-                # ✅ 按钮格式
-                button_text = f"{name} {price}U   [{stock}个]"
+                # ✅ 翻译产品名称（如果启用且用户语言为英文）
+                translated_name = self.core.translate_cached(uid, name)
+                
+                # ✅ 使用 i18n 格式化按钮文本
+                button_text = self.core._t('products_button_format', uid,
+                                          name=translated_name,
+                                          price=price,
+                                          stock=stock)
                 kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
             
             # 如果没有有库存的商品
@@ -3058,6 +3196,7 @@ class AgentBotHandlers:
     def show_product_detail(self, query, nowuid: str):
         """显示商品详情 - 完全仿照总部格式"""
         try:
+            uid = query.from_user.id
             prod = self.core.config.ejfl.find_one({'nowuid': nowuid})
             if not prod:
                 self.safe_edit_message(query, "❌ 商品不存在", [[InlineKeyboardButton("🔙 返回", callback_data="back_products")]], parse_mode=None)
@@ -3079,7 +3218,10 @@ class AgentBotHandlers:
             category = agent_price_info.get('category') if agent_price_info else (prod.get('leixing') or AGENT_PROTOCOL_CATEGORY_UNIFIED)
             
             # ✅ 完全按照总部的简洁格式
-            product_name = self.H(prod.get('projectname', 'N/A'))
+            # ✅ 翻译产品名称（如果启用且用户语言为英文）
+            original_name = prod.get('projectname', 'N/A')
+            translated_name = self.core.translate_cached(uid, original_name)
+            product_name = self.H(translated_name)
             product_status = "✅您正在购买："
             
             text = (

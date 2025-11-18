@@ -25,6 +25,9 @@
   "products_items": "items",
   "products_no_categories": "❌ No product categories available",
   
+  "categories_button_format": "{name}  [{count} items]",
+  "products_button_format": "{name} {price}U   [{stock} items]",
+  
   "category_products_title": "📦 {category}",
   "category_products_page": "Page {page}",
   "category_products_price": "Price",
