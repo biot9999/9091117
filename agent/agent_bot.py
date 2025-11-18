@@ -776,10 +776,12 @@ class AgentBotCore:
         """
         # 检查是否需要翻译
         if not self.config.AUTO_TRANSLATE_ENABLED:
+            logger.debug(f"Translation disabled for user {user_id}")
             return text
         
         user_lang = self.get_user_lang(user_id)
         if user_lang != 'en':
+            logger.info(f"User {user_id} language is '{user_lang}', not translating")
             return text
         
         if not text or not text.strip():
