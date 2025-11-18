@@ -43,6 +43,16 @@ except Exception as _qr_import_err:
     Image = None
     print(f"⚠️ 二维码依赖未就绪(qrcode/Pillow)，将回退纯文本: {_qr_import_err}")
 
+# Google Translate for automatic translation
+try:
+    from googletrans import Translator
+    GOOGLE_TRANSLATOR = Translator()
+    TRANSLATION_AVAILABLE = True
+except Exception as _trans_import_err:
+    GOOGLE_TRANSLATOR = None
+    TRANSLATION_AVAILABLE = False
+    print(f"⚠️ Google Translate 未就绪，将仅使用字典翻译: {_trans_import_err}")
+
 # ================= 环境变量加载（支持 --env / ENV_FILE / 默认 .env） =================
 def _resolve_env_file(argv: list) -> Path:
     env_file_cli = None
@@ -721,11 +731,12 @@ class AgentBotCore:
         return i18n.get(key, lang, **kwargs)
     
     def translate_product_name(self, product_name: str, user_id: int = None) -> str:
-        """Translate product name by replacing country names and common phrases
+        """Translate product name by replacing country names, common phrases, and using Google Translate
         
-        将商品名称中的国家名和常用词组翻译为用户选择的语言
+        将商品名称中的国家名和常用词组翻译为用户选择的语言，并使用 Google Translate 处理剩余中文
         例如: "墨西哥🇲🇽+52" -> "Mexico🇲🇽+52" (英文)
               "【3-8年】老号" -> "【3-8years】Old Account" (英文)
+              "任意中文文本" -> "Any Chinese text" (英文, via Google Translate)
         """
         lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
         
@@ -733,7 +744,7 @@ class AgentBotCore:
         if lang == 'zh':
             return product_name
         
-        # 英文模式：替换所有已知的国家名和常用词组
+        # 英文模式：先替换所有已知的国家名和常用词组
         translated_name = product_name
         
         # 构建国家名和词组映射表（中文 -> 英文）
@@ -753,7 +764,23 @@ class AgentBotCore:
         for zh_text, en_text in sorted_translations:
             translated_name = translated_name.replace(zh_text, en_text)
         
+        # 如果还有中文字符且 Google Translate 可用，使用自动翻译
+        if TRANSLATION_AVAILABLE and self._contains_chinese(translated_name):
+            try:
+                # 使用 Google Translate 翻译剩余的中文
+                result = GOOGLE_TRANSLATOR.translate(translated_name, src='zh-cn', dest='en')
+                if result and result.text:
+                    translated_name = result.text
+            except Exception as e:
+                # 翻译失败时记录日志但不影响正常流程
+                logger.warning(f"Google Translate 失败: {e}")
+        
         return translated_name
+    
+    def _contains_chinese(self, text: str) -> bool:
+        """检查文本中是否包含中文字符"""
+        import re
+        return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 
     def auto_sync_new_products(self):

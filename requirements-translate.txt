@@ -1,0 +1,7 @@
+# Google Translate for automatic Chinese to English translation
+# This is optional - the system will work without it using dictionary-only translation
+googletrans==4.0.0-rc1
+
+# Alternative translation libraries (choose one):
+# deep-translator==1.11.4  # Supports multiple translation services
+# translators==5.8.9       # Multiple translation engines
