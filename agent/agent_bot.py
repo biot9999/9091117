@@ -2538,14 +2538,14 @@ class AgentBotHandlers:
             uid = user.id
             lang = self.core.get_user_lang(uid)
             
-            text = f"""🎉 欢迎使用 {self.H(self.core.config.AGENT_NAME)}！
+            text = f"""{self.core._t('start_welcome', uid, agent_name=self.H(self.core.config.AGENT_NAME))}
 
-👤 用户信息
-• ID: {user.id}
-• 用户名: @{self.H(user.username or '未设置')}
-• 昵称: {self.H(user.first_name or '未设置')}
+{self.core._t('start_user_info', uid)}
+• {self.core._t('start_user_id', uid)}: {user.id}
+• {self.core._t('start_username', uid)}: @{self.H(user.username or self.core._t('start_not_set', uid))}
+• {self.core._t('start_nickname', uid)}: {self.H(user.first_name or self.core._t('start_not_set', uid))}
 
-请选择功能："""
+{self.core._t('start_select_function', uid)}"""
             kb = [
                 [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
                  InlineKeyboardButton(self.core._t("menu_profile", uid), callback_data="profile")],
@@ -2565,7 +2565,7 @@ class AgentBotHandlers:
             
             update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
         else:
-            update.message.reply_text("初始化失败，请稍后重试")
+            update.message.reply_text(self.core._t('start_init_failed', uid))
 
     def show_main_menu(self, query):
         user = query.from_user
@@ -2600,10 +2600,11 @@ class AgentBotHandlers:
     def reload_admins_command(self, update: Update, context: CallbackContext):
         """重新加载管理员列表（仅管理员可用）"""
         user = update.effective_user
+        uid = user.id
         
         # 检查是否为管理员
         if not self.core.config.is_admin(user.id):
-            update.message.reply_text("❌ 无权限")
+            update.message.reply_text(self.core._t('error_no_permission', uid))
             return
         
         # 重新加载管理员列表
@@ -2612,9 +2613,9 @@ class AgentBotHandlers:
         # 返回当前管理员列表
         if admins:
             admin_list = ", ".join(str(uid) for uid in admins)
-            text = f"✅ 管理员列表已重新加载\n\n当前管理员用户ID:\n{admin_list}"
+            text = self.core._t('admin_reload_success', uid, admin_list=admin_list)
         else:
-            text = "⚠️ 管理员列表已重新加载，但当前无管理员配置"
+            text = self.core._t('admin_reload_empty', uid)
         
         update.message.reply_text(text)
     
@@ -2646,7 +2647,7 @@ class AgentBotHandlers:
     def show_profit_center(self, query):
         uid = query.from_user.id
         if not self.core.config.is_admin(uid):
-            self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('error_no_permission', uid), [[InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]], parse_mode=None)
             return
         s = self.core.get_profit_summary()
         refresh_time = self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')
@@ -2674,20 +2675,20 @@ class AgentBotHandlers:
     def start_withdrawal(self, query):
         uid = query.from_user.id
         if not self.core.config.is_admin(uid):
-            query.answer("无权限", show_alert=True)
+            query.answer(self.core._t('error_no_permission_alert', uid), show_alert=True)
             return
         s = self.core.get_profit_summary()
         if s['available_profit'] <= 0:
-            self.safe_edit_message(query, "⚠️ 当前无可提现利润", [[InlineKeyboardButton("🔙 返回", callback_data="profit_center")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('profit_no_available', uid), [[InlineKeyboardButton(self.core._t('button_return', uid), callback_data="profit_center")]], parse_mode=None)
             return
-        text = f"""📝 <b>申请提现</b>
+        text = f"""{self.core._t('profit_withdraw_title', uid)}
 
-可提现金额: {s['available_profit']:.2f} USDT
-请输入提现金额（例如: {min(s['available_profit'], 10):.2f}）
+{self.core._t('profit_available_amount', uid, amount=f"{s['available_profit']:.2f}")}
+{self.core._t('profit_enter_amount_prompt', uid, example=f"{min(s['available_profit'], 10):.2f}")}
 
-直接发送数字金额："""
+{self.core._t('profit_enter_amount_direct', uid)}"""
         self.user_states[uid] = {'state': 'waiting_withdraw_amount'}
-        self.safe_edit_message(query, text, [[InlineKeyboardButton("🔙 取消", callback_data="profit_center")]], parse_mode=ParseMode.HTML)
+        self.safe_edit_message(query, text, [[InlineKeyboardButton(self.core._t('button_return', uid), callback_data="profit_center")]], parse_mode=ParseMode.HTML)
 
     def handle_withdraw_amount_input(self, update: Update):
         uid = update.effective_user.id
@@ -2696,32 +2697,32 @@ class AgentBotHandlers:
             amt = float(text)
             s = self.core.get_profit_summary()
             if amt <= 0:
-                update.message.reply_text("❌ 金额必须大于0，请重新输入")
+                update.message.reply_text(self.core._t('withdraw_amount_positive', uid))
                 return
             if amt > s['available_profit']:
-                update.message.reply_text(f"❌ 超出可提现余额 {s['available_profit']:.2f}，请重新输入")
+                update.message.reply_text(self.core._t('withdraw_amount_exceeds', uid, balance=f"{s['available_profit']:.2f}"))
                 return
             self.user_states[uid] = {'state': 'waiting_withdraw_address', 'withdraw_amount': amt}
             update.message.reply_text(
-                f"✅ 金额已记录：{amt:.2f} USDT\n请发送收款地址（TRON 或 ERC20）",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 取消", callback_data="profit_center")]])
+                self.core._t('withdraw_amount_recorded', uid, amount=f"{amt:.2f}"),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.core._t('button_return', uid), callback_data="profit_center")]])
             )
         except ValueError:
-            update.message.reply_text("❌ 金额格式错误，请输入数字")
+            update.message.reply_text(self.core._t('withdraw_amount_format_error', uid))
 
     def handle_withdraw_address_input(self, update: Update):
         uid = update.effective_user.id
         address = update.message.text.strip()
         if len(address) < 10:
-            update.message.reply_text("❌ 地址长度不正确，请重新输入")
+            update.message.reply_text(self.core._t('withdraw_address_invalid_length', uid))
             return
         amt = self.user_states[uid]['withdraw_amount']
         ok, msg = self.core.request_profit_withdrawal(uid, amt, address)
         self.user_states.pop(uid, None)
         if ok:
             update.message.reply_text(
-                f"✅ 提现申请成功\n金额：{amt:.2f} USDT\n地址：{self.H(address)}\n状态：待审核",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💸 返回利润中心", callback_data="profit_center")]]),
+                self.core._t('withdraw_request_success', uid, amount=f"{amt:.2f}", address=self.H(address)),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.core._t('withdraw_back_to_profit', uid), callback_data="profit_center")]]),
                 parse_mode=ParseMode.HTML
             )
         else:
@@ -2730,7 +2731,7 @@ class AgentBotHandlers:
     def show_withdrawal_list(self, query):
         uid = query.from_user.id
         if not self.core.config.is_admin(uid):
-            self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("返回", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('error_no_permission', uid), [[InlineKeyboardButton(self.core._t('button_return_main', uid), callback_data="back_main")]], parse_mode=None)
             return
         recs = self.core.config.withdrawal_requests.find({
             'agent_bot_id': self.core.config.AGENT_BOT_ID,
@@ -3122,15 +3123,15 @@ class AgentBotHandlers:
         
         # ✅ 完全按照总部的格式
         text = (
-            f"请输入数量:\n"
-            f"格式: 10\n\n"
-            f"✅ 您正在购买 - {self.H(prod['projectname'])}\n"
-            f"💰 单价: {price} U\n"
-            f"🪙 您的余额: {bal:.2f} U\n"
-            f"📊 最多可买: {max_qty} 个"
+            f"{self.core._t('purchase_enter_quantity', uid)}\n"
+            f"{self.core._t('purchase_format_example', uid)}\n\n"
+            f"{self.core._t('purchase_purchasing', uid, product=self.H(prod['projectname']))}\n"
+            f"{self.core._t('purchase_unit_price', uid, price=price)}\n"
+            f"{self.core._t('purchase_your_balance', uid, balance=f'{bal:.2f}')}\n"
+            f"{self.core._t('purchase_max_quantity', uid, max_qty=max_qty)}"
         )
         kb = [
-            [InlineKeyboardButton("❌ 取消交易", callback_data=f"product_{nowuid}")]
+            [InlineKeyboardButton(self.core._t('purchase_cancel_transaction', uid), callback_data=f"product_{nowuid}")]
         ]
         
         # ✅ 保存当前消息的ID（这是要被删除的消息）
@@ -3156,7 +3157,7 @@ class AgentBotHandlers:
         try:
             qty = int(update.message.text.strip())
         except:
-            update.message.reply_text("❌ 请输入有效整数")
+            update.message.reply_text(self.core._t('purchase_invalid_integer', uid))
             return
         
         st = self.user_states[uid]
@@ -3168,15 +3169,15 @@ class AgentBotHandlers:
         bal = user.get('USDT', 0) if user else 0
         
         if qty <= 0:
-            update.message.reply_text("❌ 数量需 > 0")
+            update.message.reply_text(self.core._t('purchase_quantity_positive', uid))
             return
         if qty > stock:
-            update.message.reply_text(f"❌ 库存不足（当前 {stock}）")
+            update.message.reply_text(self.core._t('purchase_insufficient_stock', uid, stock=stock))
             return
         
         total_cost = price * qty
         if total_cost > bal:
-            update.message.reply_text(f"❌ 余额不足，需: {total_cost:.2f}U 当前: {bal:.2f}U")
+            update.message.reply_text(self.core._t('purchase_insufficient_balance', uid, required=f"{total_cost:.2f}", balance=f"{bal:.2f}"))
             return
         
         chat_id = uid
@@ -3196,16 +3197,16 @@ class AgentBotHandlers:
         
         # ✅ 显示确认页面（总部格式）
         text = (
-            f"<b>✅ 您正在购买 - {self.H(prod['projectname'])}</b>\n\n"
-            f"<b>🛍 数量: {qty}</b>\n\n"
-            f"<b>💰 价格: {price}</b>\n\n"
-            f"<b>🪙 您的余额: {bal:.2f}</b>"
+            f"<b>{self.core._t('purchase_confirming', uid, product=self.H(prod['projectname']))}</b>\n\n"
+            f"<b>{self.core._t('purchase_quantity_label', uid, quantity=qty)}</b>\n\n"
+            f"<b>{self.core._t('purchase_price_label', uid, price=price)}</b>\n\n"
+            f"<b>{self.core._t('purchase_balance_label', uid, balance=f'{bal:.2f}')}</b>"
         )
         
         kb = [
-            [InlineKeyboardButton("❌ 取消交易", callback_data=f"product_{nowuid}"),
-             InlineKeyboardButton("✅ 确认购买", callback_data=f"confirm_buy_{nowuid}_{qty}")],
-            [InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]
+            [InlineKeyboardButton(self.core._t('purchase_cancel_transaction', uid), callback_data=f"product_{nowuid}"),
+             InlineKeyboardButton(self.core._t('purchase_confirm_button', uid), callback_data=f"confirm_buy_{nowuid}_{qty}")],
+            [InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]
         ]
         
         # ✅ 用 send_message 发送确认页面
@@ -3413,12 +3414,12 @@ class AgentBotHandlers:
     def show_price_management(self, query, page: int = 1):
         uid = query.from_user.id
         if not self.core.config.is_admin(uid):
-            self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('error_no_permission', uid), [[InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]], parse_mode=None)
             return
         res = self.core.get_agent_product_list(uid, page)
         prods = res['products']
         if not prods:
-            self.safe_edit_message(query, "❌ 暂无商品可管理", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('price_no_products', uid), [[InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]], parse_mode=None)
             return
         text = f"💰 价格管理（第{page}页）\n\n"
         kb = []
@@ -3529,7 +3530,7 @@ class AgentBotHandlers:
     def show_system_reports(self, query):
         uid = query.from_user.id
         if not self.core.config.is_admin(uid):
-            self.safe_edit_message(query, "❌ 无权限", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, self.core._t('error_no_permission', uid), [[InlineKeyboardButton(self.core._t('menu_back_main', uid), callback_data="back_main")]], parse_mode=None)
             return
         text = ("📊 系统报表中心\n\n"
                 "请选择需要查看的报表类型：")
