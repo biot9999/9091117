@@ -512,5 +512,17 @@
   "country_montenegro": "Montenegro",
   "country_luxembourg": "Luxembourg",
   "country_malta": "Malta",
-  "country_cyprus": "Cyprus"
+  "country_cyprus": "Cyprus",
+  "phrase_old_account": "Old Account",
+  "phrase_year": "year",
+  "phrase_years": "years",
+  "phrase_with_password": "with password",
+  "phrase_no_password": "no password",
+  "phrase_protocol": "Protocol",
+  "phrase_account": "Account",
+  "phrase_number": "Number",
+  "phrase_new": "New",
+  "phrase_old": "Old",
+  "phrase_used": "Second-hand",
+  "phrase_original": "Original"
 }

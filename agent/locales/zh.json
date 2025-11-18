@@ -512,5 +512,17 @@
   "country_montenegro": "黑山",
   "country_luxembourg": "卢森堡",
   "country_malta": "马耳他",
-  "country_cyprus": "塞浦路斯"
+  "country_cyprus": "塞浦路斯",
+  "phrase_old_account": "老号",
+  "phrase_year": "年",
+  "phrase_years": "年",
+  "phrase_with_password": "有密码",
+  "phrase_no_password": "无密码",
+  "phrase_protocol": "协议",
+  "phrase_account": "账号",
+  "phrase_number": "号",
+  "phrase_new": "新",
+  "phrase_old": "老",
+  "phrase_used": "二手",
+  "phrase_original": "原版"
 }

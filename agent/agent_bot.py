@@ -721,10 +721,11 @@ class AgentBotCore:
         return i18n.get(key, lang, **kwargs)
     
     def translate_product_name(self, product_name: str, user_id: int = None) -> str:
-        """Translate product name by replacing country names
+        """Translate product name by replacing country names and common phrases
         
-        将商品名称中的国家名翻译为用户选择的语言
+        将商品名称中的国家名和常用词组翻译为用户选择的语言
         例如: "墨西哥🇲🇽+52" -> "Mexico🇲🇽+52" (英文)
+              "【3-8年】老号" -> "【3-8years】Old Account" (英文)
         """
         lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
         
@@ -732,24 +733,25 @@ class AgentBotCore:
         if lang == 'zh':
             return product_name
         
-        # 英文模式：替换所有已知的国家名
+        # 英文模式：替换所有已知的国家名和常用词组
         translated_name = product_name
         
-        # 构建国家名映射表（中文 -> 英文）
-        country_mapping = {}
+        # 构建国家名和词组映射表（中文 -> 英文）
+        translation_mapping = {}
         for key in i18n.translations.get('zh', {}).keys():
-            if key.startswith('country_'):
+            # Include both country names and common phrases
+            if key.startswith('country_') or key.startswith('phrase_'):
                 zh_name = i18n.get(key, 'zh')
                 en_name = i18n.get(key, 'en')
                 if zh_name and en_name and zh_name != en_name:
-                    country_mapping[zh_name] = en_name
+                    translation_mapping[zh_name] = en_name
         
-        # 按长度降序排序，确保先匹配较长的国家名（避免部分匹配问题）
-        sorted_countries = sorted(country_mapping.items(), key=lambda x: len(x[0]), reverse=True)
+        # 按长度降序排序，确保先匹配较长的词组（避免部分匹配问题）
+        sorted_translations = sorted(translation_mapping.items(), key=lambda x: len(x[0]), reverse=True)
         
-        # 替换所有匹配的国家名
-        for zh_name, en_name in sorted_countries:
-            translated_name = translated_name.replace(zh_name, en_name)
+        # 替换所有匹配的词组和国家名
+        for zh_text, en_text in sorted_translations:
+            translated_name = translated_name.replace(zh_text, en_text)
         
         return translated_name
 
