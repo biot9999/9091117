@@ -22,7 +22,6 @@ import random
 import requests
 import threading
 import re
-import json
 from decimal import Decimal, ROUND_DOWN
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -34,16 +33,6 @@ from html import escape as html_escape
 from pathlib import Path
 from io import BytesIO
 from typing import Union
-
-# Auto translate module
-try:
-    from .auto_translate import AutoTranslator
-except ImportError:
-    # Fallback for direct execution
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent))
-    from auto_translate import AutoTranslator
-
 # 二维码与图片
 try:
     import qrcode
@@ -100,134 +89,6 @@ AGENT_RESTOCK_NOTIFY_CHAT_ID = os.getenv("AGENT_RESTOCK_NOTIFY_CHAT_ID")
 # ✅ 统一协议号分类配置
 AGENT_PROTOCOL_CATEGORY_UNIFIED = os.getenv("AGENT_PROTOCOL_CATEGORY_UNIFIED", "🔥二次协议号（session+json）")
 AGENT_PROTOCOL_CATEGORY_ALIASES = os.getenv("AGENT_PROTOCOL_CATEGORY_ALIASES", "协议号,未分类,,🔥二手TG协议号（session+json）,二手TG协议号（session+json）,二次协议号（session+json）")
-
-# ================= i18n Language System =================
-class I18nManager:
-    """国际化语言管理器"""
-    def __init__(self):
-        self.locales_dir = Path(__file__).parent / "locales"
-        self.translations = {}
-        self.supported_languages = []
-        self.default_lang = os.getenv("AGENT_DEFAULT_LANG", "zh")
-        
-        # Load and validate language packs
-        self._load_translations()
-        self._validate_coverage()
-    
-    def _load_translations(self):
-        """加载所有语言包"""
-        if not self.locales_dir.exists():
-            logger.error(f"❌ Locales directory not found: {self.locales_dir}")
-            sys.exit(1)
-        
-        for lang_file in self.locales_dir.glob("*.json"):
-            lang_code = lang_file.stem
-            try:
-                with open(lang_file, 'r', encoding='utf-8') as f:
-                    self.translations[lang_code] = json.load(f)
-                self.supported_languages.append(lang_code)
-                logger.info(f"✅ Loaded language pack: {lang_code} ({len(self.translations[lang_code])} keys)")
-            except Exception as e:
-                logger.error(f"❌ Failed to load language pack {lang_file}: {e}")
-                sys.exit(1)
-        
-        if not self.translations:
-            logger.error("❌ No language packs found in locales/ directory")
-            sys.exit(1)
-        
-        if self.default_lang not in self.translations:
-            logger.error(f"❌ Default language '{self.default_lang}' not found in available languages: {self.supported_languages}")
-            sys.exit(1)
-    
-    def _validate_coverage(self):
-        """严格验证语言包覆盖率（所有语言的键必须完全一致）"""
-        if len(self.translations) < 2:
-            logger.warning("⚠️ Only one language pack found, skipping coverage check")
-            return
-        
-        # Get reference keys from default language
-        reference_lang = self.default_lang
-        reference_keys = set(self.translations[reference_lang].keys())
-        
-        # Check all other languages against reference
-        errors = []
-        for lang_code, translations in self.translations.items():
-            if lang_code == reference_lang:
-                continue
-            
-            current_keys = set(translations.keys())
-            
-            # Find missing and extra keys
-            missing_keys = reference_keys - current_keys
-            extra_keys = current_keys - reference_keys
-            
-            if missing_keys:
-                errors.append(f"  ❌ Language '{lang_code}' is missing {len(missing_keys)} key(s):")
-                for key in sorted(missing_keys)[:10]:  # Show first 10
-                    errors.append(f"     - {key}")
-                if len(missing_keys) > 10:
-                    errors.append(f"     ... and {len(missing_keys) - 10} more")
-            
-            if extra_keys:
-                errors.append(f"  ❌ Language '{lang_code}' has {len(extra_keys)} extra key(s):")
-                for key in sorted(extra_keys)[:10]:  # Show first 10
-                    errors.append(f"     - {key}")
-                if len(extra_keys) > 10:
-                    errors.append(f"     ... and {len(extra_keys) - 10} more")
-        
-        if errors:
-            logger.error("❌ Language pack coverage validation FAILED:")
-            logger.error(f"  Reference language: {reference_lang} ({len(reference_keys)} keys)")
-            for error in errors:
-                logger.error(error)
-            logger.error("\n💡 All language packs must have exactly the same keys!")
-            logger.error("   Please update the language files to match and try again.")
-            sys.exit(1)
-        
-        logger.info(f"✅ Language pack coverage validation PASSED: All {len(self.translations)} languages have {len(reference_keys)} matching keys")
-    
-    def get(self, key: str, lang: str = None, **kwargs) -> str:
-        """
-        获取翻译文本
-        
-        Args:
-            key: 翻译键
-            lang: 语言代码，如果为None则使用默认语言
-            **kwargs: 模板参数
-        
-        Returns:
-            翻译后的文本
-        """
-        lang = lang or self.default_lang
-        
-        # Fallback to default language if requested language not found
-        if lang not in self.translations:
-            lang = self.default_lang
-        
-        # Get translation
-        text = self.translations[lang].get(key)
-        
-        # Fallback to default language if key not found
-        if text is None and lang != self.default_lang:
-            text = self.translations[self.default_lang].get(key)
-        
-        # Fallback to key itself if not found
-        if text is None:
-            logger.warning(f"⚠️ Translation key not found: {key}")
-            return f"[{key}]"
-        
-        # Format with kwargs if provided
-        if kwargs:
-            try:
-                return text.format(**kwargs)
-            except KeyError as e:
-                logger.warning(f"⚠️ Missing template parameter {e} for key {key}")
-                return text
-        
-        return text
-
-# Initialize i18n manager
-i18n = I18nManager()
 
 class AgentBotConfig:
     """代理机器人配置"""
@@ -340,28 +201,6 @@ class AgentBotConfig:
         self.SUPPORT_CONTACT_USERNAME = os.getenv("SUPPORT_CONTACT_USERNAME", "9haokf")
         self.SUPPORT_CONTACT_URL = os.getenv("SUPPORT_CONTACT_URL") or f"https://t.me/{self.SUPPORT_CONTACT_USERNAME}"
         self.SUPPORT_CONTACT_DISPLAY = os.getenv("SUPPORT_CONTACT_DISPLAY")
-        
-        # ✅ 自动翻译配置
-        self.AUTO_TRANSLATE_ENABLED = os.getenv("AUTO_TRANSLATE_ENABLED", "0") in ("1", "true", "True")
-        self.AUTO_TRANSLATE_PROVIDER = os.getenv("AUTO_TRANSLATE_PROVIDER", "libre")
-        self.LIBRETRANSLATE_ENDPOINT = os.getenv("LIBRETRANSLATE_ENDPOINT", "https://libretranslate.com")
-        self.LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY")
-        
-        # 初始化自动翻译器
-        if self.AUTO_TRANSLATE_ENABLED:
-            try:
-                self.auto_translator = AutoTranslator(
-                    provider=self.AUTO_TRANSLATE_PROVIDER,
-                    endpoint=self.LIBRETRANSLATE_ENDPOINT,
-                    api_key=self.LIBRETRANSLATE_API_KEY
-                )
-                logger.info(f"✅ 自动翻译已启用: provider={self.AUTO_TRANSLATE_PROVIDER}")
-            except Exception as e:
-                logger.error(f"❌ 初始化自动翻译器失败: {e}")
-                self.auto_translator = None
-        else:
-            self.auto_translator = None
-            logger.info("ℹ️ 自动翻译已禁用")
 
         try:
             self.client = MongoClient(self.MONGODB_URI)
@@ -376,7 +215,6 @@ class AgentBotConfig:
             self.agent_profit_account = self.db['agent_profit_account']
             self.withdrawal_requests = self.db['withdrawal_requests']
             self.recharge_orders = self.db['recharge_orders']
-            self.fyb = self.db['fyb']  # ✅ 翻译缓存表
         except Exception as e:
             logger.error(f"❌ 数据库连接失败: {e}")
             raise
@@ -690,8 +528,7 @@ class AgentBotCore:
                 'register_time': now,
                 'last_active': now,
                 'last_contact_time': now,
-                'status': 'active',
-                'lang': i18n.default_lang  # Set default language
+                'status': 'active'
             })
             logger.info(f"✅ 用户注册成功 {user_id}")
             return True
@@ -705,139 +542,6 @@ class AgentBotCore:
         except Exception as e:
             logger.error(f"❌ 获取用户信息失败: {e}")
             return None
-    
-    def get_user_lang(self, user_id: int) -> str:
-        """获取用户语言偏好"""
-        user = self.get_user_info(user_id)
-        if user and 'lang' in user:
-            return user['lang']
-        return i18n.default_lang
-    
-    def set_user_lang(self, user_id: int, lang: str) -> bool:
-        """设置用户语言偏好"""
-        try:
-            if lang not in i18n.supported_languages:
-                logger.warning(f"⚠️ Unsupported language: {lang}")
-                return False
-            
-            coll = self.config.get_agent_user_collection()
-            result = coll.update_one(
-                {'user_id': user_id},
-                {'$set': {'lang': lang}}
-            )
-            if result.modified_count > 0:
-                logger.info(f"✅ User {user_id} language updated to {lang}")
-                return True
-            else:
-                # User might not exist yet, try to create
-                user = coll.find_one({'user_id': user_id})
-                if not user:
-                    logger.warning(f"⚠️ User {user_id} not found, cannot set language")
-                return False
-        except Exception as e:
-            logger.error(f"❌ 设置用户语言失败: {e}")
-            return False
-    
-    def _t(self, key: str, user_id: int = None, **kwargs) -> str:
-        """
-        Translation helper
-        
-        Args:
-            key: Translation key
-            user_id: User ID to get language preference, if None uses default
-            **kwargs: Template parameters
-        
-        Returns:
-            Translated text
-        """
-        lang = self.get_user_lang(user_id) if user_id else i18n.default_lang
-        return i18n.get(key, lang, **kwargs)
-    
-    def translate_cached(self, user_id: int, text: str) -> str:
-        """
-        翻译动态文本（带缓存）
-        
-        仅在以下条件同时满足时翻译：
-        1. AUTO_TRANSLATE_ENABLED 为 True
-        2. 用户语言为 'en'
-        
-        翻译流程：
-        1. 查询 fyb 集合中的缓存
-        2. 如果未缓存，调用 auto_translator.translate()
-        3. 将翻译结果存入 fyb 集合
-        4. 返回翻译结果或原文（失败时）
-        
-        Args:
-            user_id: 用户ID（用于获取语言偏好）
-            text: 要翻译的文本
-        
-        Returns:
-            翻译后的文本（英文），或原文本（失败/未启用/非英文用户）
-        """
-        # 检查是否需要翻译
-        if not self.config.AUTO_TRANSLATE_ENABLED:
-            logger.debug(f"Translation disabled for user {user_id}")
-            return text
-        
-        user_lang = self.get_user_lang(user_id)
-        if user_lang != 'en':
-            logger.info(f"User {user_id} language is '{user_lang}', not translating")
-            return text
-        
-        if not text or not text.strip():
-            return text
-        
-        # 检查翻译器是否可用
-        if not self.config.auto_translator:
-            logger.warning("⚠️ Auto translator not initialized, returning original text")
-            return text
-        
-        try:
-            # 查询缓存
-            cache_key = {
-                'text': text,
-                'language': 'en'
-            }
-            
-            cached = self.config.fyb.find_one(cache_key)
-            
-            if cached and cached.get('fanyi'):
-                # 缓存命中
-                logger.info(f"✅ Translation cache hit for '{text[:30]}...'")
-                return cached['fanyi']
-            
-            # 缓存未命中，调用翻译器
-            logger.info(f"🔄 Translating '{text[:30]}...'")
-            translated = self.config.auto_translator.translate(text)
-            
-            # 如果翻译失败（返回原文），不缓存
-            if translated == text:
-                logger.warning(f"⚠️ Translation returned original text for '{text[:30]}...'")
-                return text
-            
-            # 存入缓存
-            try:
-                self.config.fyb.update_one(
-                    cache_key,
-                    {
-                        '$set': {
-                            'text': text,
-                            'fanyi': translated,
-                            'language': 'en',
-                            'created_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        }
-                    },
-                    upsert=True
-                )
-                logger.info(f"✅ Cached translation: '{text[:30]}...' -> '{translated[:30]}...'")
-            except Exception as cache_err:
-                logger.warning(f"⚠️ Failed to cache translation: {cache_err}")
-            
-            return translated
-            
-        except Exception as e:
-            logger.error(f"❌ Translation failed for '{text[:50]}...': {e}")
-            return text
 
     def auto_sync_new_products(self):
         """自动同步总部新增商品到代理（增强版：支持价格为0的商品预建记录 + 统一协议号分类）"""
@@ -2493,8 +2197,7 @@ class AgentBotHandlers:
             old_text = (getattr(query.message, "text", "") or "")
             if old_text.strip() == text.strip():
                 try:
-                    uid = query.from_user.id
-                    query.answer(self.core._t("ui_already_latest", uid))
+                    query.answer("界面已是最新状态")
                 except:
                     pass
                 return
@@ -2504,10 +2207,9 @@ class AgentBotHandlers:
         except Exception as e:
             msg = str(e)
             try:
-                uid = query.from_user.id if query and query.from_user else None
                 if "Message is not modified" in msg:
                     try:
-                        query.answer(self.core._t("ui_already_latest", uid) if uid else "UI already up to date")
+                        query.answer("界面已是最新状态")
                     except:
                         pass
                 elif "Can't parse entities" in msg or "can't parse entities" in msg:
@@ -2653,10 +2355,6 @@ class AgentBotHandlers:
                     return
             
             # ✅ 默认启动消息
-            # Get user's language for welcome message
-            uid = user.id
-            lang = self.core.get_user_lang(uid)
-            
             text = f"""🎉 欢迎使用 {self.H(self.core.config.AGENT_NAME)}！
 
 👤 用户信息
@@ -2666,54 +2364,36 @@ class AgentBotHandlers:
 
 请选择功能："""
             kb = [
-                [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
-                 InlineKeyboardButton(self.core._t("menu_profile", uid), callback_data="profile")],
-                [InlineKeyboardButton(self.core._t("menu_recharge", uid), callback_data="recharge"),
-                 InlineKeyboardButton(self.core._t("menu_orders", uid), callback_data="orders")]
+                [InlineKeyboardButton("🛍️ 商品中心", callback_data="products"),
+                 InlineKeyboardButton("👤 个人中心", callback_data="profile")],
+                [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
+                 InlineKeyboardButton("📊 订单历史", callback_data="orders")]
             ]
             if self.core.config.is_admin(user.id):
-                kb.append([InlineKeyboardButton(self.core._t("menu_price_management", uid), callback_data="price_management"),
-                           InlineKeyboardButton(self.core._t("menu_system_reports", uid), callback_data="system_reports")])
-                kb.append([InlineKeyboardButton(self.core._t("menu_profit_center", uid), callback_data="profit_center")])
-            kb.append([InlineKeyboardButton(self.core._t("menu_support", uid), callback_data="support"),
-                       InlineKeyboardButton(self.core._t("menu_help", uid), callback_data="help")])
-            
-            # Add language toggle button
-            current_lang_name = "中文" if lang == "zh" else "English"
-            kb.append([InlineKeyboardButton(f"{self.core._t('menu_toggle_language', uid)} ({current_lang_name})", callback_data="toggle_language")])
-            
+                kb.append([InlineKeyboardButton("💰 价格管理", callback_data="price_management"),
+                           InlineKeyboardButton("📊 系统报表", callback_data="system_reports")])
+                kb.append([InlineKeyboardButton("💸 利润提现", callback_data="profit_center")])
+            kb.append([InlineKeyboardButton("📞 联系客服", callback_data="support"),
+                       InlineKeyboardButton("❓ 使用帮助", callback_data="help")])
             update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
         else:
             update.message.reply_text("初始化失败，请稍后重试")
 
     def show_main_menu(self, query):
         user = query.from_user
-        uid = user.id
-        
-        # Get user's language
-        lang = self.core.get_user_lang(uid)
-        
-        # Build menu based on user role
         kb = [
-            [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
-             InlineKeyboardButton(self.core._t("menu_profile", uid), callback_data="profile")],
-            [InlineKeyboardButton(self.core._t("menu_recharge", uid), callback_data="recharge"),
-             InlineKeyboardButton(self.core._t("menu_orders", uid), callback_data="orders")]
+            [InlineKeyboardButton("🛍️ 商品中心", callback_data="products"),
+             InlineKeyboardButton("👤 个人中心", callback_data="profile")],
+            [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
+             InlineKeyboardButton("📊 订单历史", callback_data="orders")]
         ]
-        
         if self.core.config.is_admin(user.id):
-            kb.append([InlineKeyboardButton(self.core._t("menu_price_management", uid), callback_data="price_management"),
-                       InlineKeyboardButton(self.core._t("menu_system_reports", uid), callback_data="system_reports")])
-            kb.append([InlineKeyboardButton(self.core._t("menu_profit_center", uid), callback_data="profit_center")])
-        
-        kb.append([InlineKeyboardButton(self.core._t("menu_support", uid), callback_data="support"),
-                   InlineKeyboardButton(self.core._t("menu_help", uid), callback_data="help")])
-        
-        # Add language toggle button
-        current_lang_name = "中文" if lang == "zh" else "English"
-        kb.append([InlineKeyboardButton(f"{self.core._t('menu_toggle_language', uid)} ({current_lang_name})", callback_data="toggle_language")])
-        
-        text = f"{self.core._t('menu_back_main', uid)}\n\n{self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')}"
+            kb.append([InlineKeyboardButton("💰 价格管理", callback_data="price_management"),
+                       InlineKeyboardButton("📊 系统报表", callback_data="system_reports")])
+            kb.append([InlineKeyboardButton("💸 利润提现", callback_data="profit_center")])
+        kb.append([InlineKeyboardButton("📞 联系客服", callback_data="support"),
+                   InlineKeyboardButton("❓ 使用帮助", callback_data="help")])
+        text = f"🏠 主菜单\n\n当前时间: {self.core._to_beijing(datetime.utcnow()).strftime('%Y-%m-%d %H:%M:%S')}"
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def reload_admins_command(self, update: Update, context: CallbackContext):
@@ -2736,30 +2416,6 @@ class AgentBotHandlers:
             text = "⚠️ 管理员列表已重新加载，但当前无管理员配置"
         
         update.message.reply_text(text)
-    
-    def handle_toggle_language(self, query):
-        """Handle language toggle"""
-        uid = query.from_user.id
-        
-        # Get current language
-        current_lang = self.core.get_user_lang(uid)
-        
-        # Toggle language
-        new_lang = "en" if current_lang == "zh" else "zh"
-        
-        # Update user's language preference
-        success = self.core.set_user_lang(uid, new_lang)
-        
-        if success:
-            # Show success message in new language
-            lang_name = "English" if new_lang == "en" else "中文"
-            message = self.core._t("menu_toggle_language", uid) + f" → {lang_name}"
-            query.answer(message, show_alert=False)
-            
-            # Refresh main menu with new language
-            self.show_main_menu(query)
-        else:
-            query.answer("Failed to change language", show_alert=True)
 
     # ========== 利润中心 / 提现 ==========
     def show_profit_center(self, query):
@@ -2881,33 +2537,27 @@ class AgentBotHandlers:
     # ========== 商品相关 ==========
     def show_product_categories(self, query):
         """显示商品分类（增强版：支持显示零库存分类）"""
-        uid = query.from_user.id
         try:
             # ✅ 调用核心方法获取分类列表（包含零库存分类）
             categories = self.core.get_product_categories()
             
             if not categories:
-                self.safe_edit_message(query, self.core._t("products_no_categories", uid), [[InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]], parse_mode=None)
+                self.safe_edit_message(query, "❌ 暂无可用商品分类", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
                 return
             
             text = (
-                f"<b>{self.core._t('products_title', uid)}</b>\n\n"
-                f"{self.core._t('products_select_category', uid)}"
+                "🛒 <b>商品分类 - 请选择所需商品：</b>\n\n"
+                "「快送商品区」-「热选择所需商品」\n\n"
+                "<b>❗️首次购买请先少量测试，避免纠纷</b>！\n\n"
+                "<b>❗️长期未使用账户可能会出现问题，联系客服处理</b>。"
             )
             
             kb = []
             for cat in categories:
-                # ✅ 翻译分类名称（如果启用且用户语言为英文）
-                cat_name = cat['_id']
-                translated_name = self.core.translate_cached(uid, cat_name)
-                
-                # ✅ 使用 i18n 格式化按钮文本
-                button_text = self.core._t('categories_button_format', uid, 
-                                          name=translated_name, 
-                                          count=cat['stock'])
-                kb.append([InlineKeyboardButton(button_text, callback_data=f"category_{cat_name}")])
+                button_text = f"{cat['_id']}  [{cat['stock']}个]"
+                kb.append([InlineKeyboardButton(button_text, callback_data=f"category_{cat['_id']}")])
             
-            kb.append([InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")])
+            kb.append([InlineKeyboardButton("🏠 主菜单", callback_data="back_main")])
             
             self.safe_edit_message(query, text, kb, parse_mode='HTML')
             
@@ -2915,7 +2565,7 @@ class AgentBotHandlers:
             logger.error(f"❌ 获取商品分类失败: {e}")
             import traceback
             traceback.print_exc()
-            self.safe_edit_message(query, self.core._t("error_generic", uid), [[InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, "❌ 加载失败，请重试", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
             
     def show_category_products(self, query, category: str, page: int = 1):
         """显示分类下的商品（二级分类）- 支持HQ克隆模式 + 统一协议号分类"""
@@ -3046,7 +2696,6 @@ class AgentBotHandlers:
                 
                 # 如果HQ克隆模式成功，直接渲染
                 if products_with_stock is not None:
-                    uid = query.from_user.id
                     text = (
                         "<b>🛒 这是商品列表  选择你需要的分类：</b>\n\n"
                         "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。\n\n"
@@ -3061,14 +2710,8 @@ class AgentBotHandlers:
                         price = p['price']
                         stock = p['stock']
                         
-                        # ✅ 翻译产品名称（如果启用且用户语言为英文）
-                        translated_name = self.core.translate_cached(uid, name)
-                        
-                        # ✅ 使用 i18n 格式化按钮文本
-                        button_text = self.core._t('products_button_format', uid,
-                                                   name=translated_name,
-                                                   price=price,
-                                                   stock=stock)
+                        # ✅ 按钮格式
+                        button_text = f"{name} {price}U   [{stock}个]"
                         kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
                     
                     # 如果没有有库存的商品
@@ -3152,7 +2795,6 @@ class AgentBotHandlers:
             products_with_stock.sort(key=lambda x: -x['stock'])
             
             # ✅ 文本格式
-            uid = query.from_user.id
             text = (
                 "<b>🛒 这是商品列表  选择你需要的分类：</b>\n\n"
                 "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。\n\n"
@@ -3167,14 +2809,8 @@ class AgentBotHandlers:
                 price = p['price']
                 stock = p['stock']
                 
-                # ✅ 翻译产品名称（如果启用且用户语言为英文）
-                translated_name = self.core.translate_cached(uid, name)
-                
-                # ✅ 使用 i18n 格式化按钮文本
-                button_text = self.core._t('products_button_format', uid,
-                                          name=translated_name,
-                                          price=price,
-                                          stock=stock)
+                # ✅ 按钮格式
+                button_text = f"{name} {price}U   [{stock}个]"
                 kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
             
             # 如果没有有库存的商品
@@ -3198,7 +2834,6 @@ class AgentBotHandlers:
     def show_product_detail(self, query, nowuid: str):
         """显示商品详情 - 完全仿照总部格式"""
         try:
-            uid = query.from_user.id
             prod = self.core.config.ejfl.find_one({'nowuid': nowuid})
             if not prod:
                 self.safe_edit_message(query, "❌ 商品不存在", [[InlineKeyboardButton("🔙 返回", callback_data="back_products")]], parse_mode=None)
@@ -3220,10 +2855,7 @@ class AgentBotHandlers:
             category = agent_price_info.get('category') if agent_price_info else (prod.get('leixing') or AGENT_PROTOCOL_CATEGORY_UNIFIED)
             
             # ✅ 完全按照总部的简洁格式
-            # ✅ 翻译产品名称（如果启用且用户语言为英文）
-            original_name = prod.get('projectname', 'N/A')
-            translated_name = self.core.translate_cached(uid, original_name)
-            product_name = self.H(translated_name)
+            product_name = self.H(prod.get('projectname', 'N/A'))
             product_status = "✅您正在购买："
             
             text = (
@@ -3427,29 +3059,28 @@ class AgentBotHandlers:
         # 🔍 调试：打印查询结果
         logger.info(f"🔍 DEBUG: query result for user {uid} = {info}")
         if not info:
-            self.safe_edit_message(query, self.core._t("error_generic", uid), [[InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]], parse_mode=None)
+            self.safe_edit_message(query, "❌ 用户信息不存在", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
             return
         
         avg = round(info.get('zgje', 0) / max(info.get('zgsl', 1), 1), 2)
-        level_emoji = '🥇' if info.get('zgje', 0) > 100 else '🥈' if info.get('zgje', 0) > 50 else '🥉'
-        level_name = self.core._t("user_report_level_gold", uid) if info.get('zgje', 0) > 100 else self.core._t("user_report_level_silver", uid) if info.get('zgje', 0) > 50 else self.core._t("user_report_level_bronze", uid)
+        level = '🥇 金牌' if info.get('zgje', 0) > 100 else '🥈 银牌' if info.get('zgje', 0) > 50 else '🥉 铜牌'
         
         text = (
-            f"{self.core._t('profile_title', uid)}\n\n"
-            f"{self.core._t('profile_user_id', uid)}: {uid}\n"
-            f"Internal ID: {self.H(info.get('count_id', '-'))}\n"
-            f"{self.core._t('profile_balance', uid)}: {info.get('USDT', 0):.2f}U\n"
-            f"{self.core._t('profile_total_spent', uid)}: {info.get('zgje', 0):.2f}U  {self.core._t('profile_total_orders', uid)}:{info.get('zgsl', 0)}\n"
-            f"{self.core._t('sales_report_avg_order', uid)}: {avg:.2f}U\n"
-            f"Level: {level_emoji} {level_name}\n"
+            f"👤 个人中心\n\n"
+            f"ID: {uid}\n"
+            f"内部ID: {self.H(info.get('count_id', '-'))}\n"
+            f"余额: {info.get('USDT', 0):.2f}U\n"
+            f"累计消费: {info.get('zgje', 0):.2f}U  次数:{info.get('zgsl', 0)}\n"
+            f"平均订单: {avg:.2f}U\n"
+            f"等级: {level}\n"
         )
         
         kb = [
-            [InlineKeyboardButton(self.core._t("menu_recharge", uid), callback_data="recharge"),
-             InlineKeyboardButton(self.core._t("menu_orders", uid), callback_data="orders")],
-            [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
-             InlineKeyboardButton(self.core._t("menu_support", uid), callback_data="support")],
-            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
+            [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
+             InlineKeyboardButton("📊 订单历史", callback_data="orders")],
+            [InlineKeyboardButton("🛍️ 商品中心", callback_data="products"),
+             InlineKeyboardButton("📞 联系客服", callback_data="support")],
+            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
         ]
         
         self.safe_edit_message(query, text, kb, parse_mode=None)
@@ -3756,33 +3387,31 @@ class AgentBotHandlers:
 
     # ========== 其它 ==========
     def show_support_info(self, query):
-        uid = query.from_user.id
         # Build display text using config
         display = self.core.config.SUPPORT_CONTACT_DISPLAY or f"@{self.core.config.SUPPORT_CONTACT_USERNAME}"
-        text = self.core._t("support_contact", uid, contact=display) + "\n" + self.core._t("support_description", uid)
+        text = f"📞 客服 {display}\n请描述问题 + 用户ID/订单号，便于快速处理。"
         kb = [
-            [InlineKeyboardButton(self.core._t("support_button_contact", uid), url=self.core.config.SUPPORT_CONTACT_URL)],
-            [InlineKeyboardButton(self.core._t("support_button_profile", uid), callback_data="profile"),
-             InlineKeyboardButton(self.core._t("support_button_help", uid), callback_data="help")],
-            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
+            [InlineKeyboardButton("💬 联系客服", url=self.core.config.SUPPORT_CONTACT_URL)],
+            [InlineKeyboardButton("👤 个人中心", callback_data="profile"),
+             InlineKeyboardButton("❓ 使用帮助", callback_data="help")],
+            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
     def show_help_info(self, query):
-        uid = query.from_user.id
         # Build display text using config
         display = self.core.config.SUPPORT_CONTACT_DISPLAY or f"@{self.core.config.SUPPORT_CONTACT_USERNAME}"
         text = (
-            f"{self.core._t('help_title', uid)}\n\n"
-            f"{self.core._t('help_purchase', uid)}\n"
-            f"{self.core._t('help_recharge', uid)}\n"
-            f"{self.core._t('help_auto_settle', uid)}\n"
-            f"{self.core._t('help_contact', uid, contact=display)}"
+            "❓ 使用帮助\n\n"
+            "• 购买：分类 -> 商品 -> 立即购买 -> 输入数量\n"
+            "• 充值：进入充值 -> 选择金额或输入金额 -> 按识别金额精确转账\n"
+            "• 自动监听入账，无需手动校验\n"
+            f"• 有问题联系人工客服 {display}"
         )
         kb = [
-            [InlineKeyboardButton(self.core._t("help_button_contact_support", uid), callback_data="support"),
-             InlineKeyboardButton(self.core._t("help_button_products", uid), callback_data="products")],
-            [InlineKeyboardButton(self.core._t("menu_back_main", uid), callback_data="back_main")]
+            [InlineKeyboardButton("📞 联系客服", callback_data="support"),
+             InlineKeyboardButton("🛍️ 商品中心", callback_data="products")],
+            [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
         ]
         self.safe_edit_message(query, text, kb, parse_mode=None)
 
@@ -4049,10 +3678,6 @@ class AgentBotHandlers:
         d = q.data
         try:
             logger.info(f"[DEBUG] callback data: {d}")
-
-            # Language toggle
-            if d == "toggle_language":
-                self.handle_toggle_language(q); return
 
             # 基础导航
             if d == "products":
