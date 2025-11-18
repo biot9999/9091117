@@ -268,10 +268,10 @@
   "error_generic": "发生错误，请稍后重试",
   "error_network": "网络错误，请检查连接",
   "error_timeout": "操作超时，请重试",
-  "button_close": "关闭",
+  "button_close": "❌ 关闭",
   "button_cancel": "取消",
   "button_confirm": "确认",
-  "button_back": "返回",
+  "button_back": "🔙 返回",
   "button_next": "下一步",
   "button_submit": "提交",
   "button_save": "保存",
@@ -321,5 +321,14 @@
   "purchase_purchasing": "✅ 您正在购买 - {product}",
   "purchase_unit_price": "💰 单价: {price} U",
   "purchase_your_balance": "🪙 您的余额: {balance} U",
-  "purchase_max_quantity": "📊 最多可买: {max_qty} 个"
+  "purchase_max_quantity": "📊 最多可买: {max_qty} 个",
+  "product_list_title": "🛒 这是商品列表  选择你需要的分类：",
+  "product_list_warning1": "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。",
+  "product_list_warning2": "❗有密码的账户售后时间1小时内，二级未知的账户售后30分钟内！",
+  "product_list_warning3": "❗购买后请第一时间检查账户，提供证明处理售后 超时损失自付！",
+  "product_list_no_stock": "暂无商品耐心等待",
+  "product_list_item_format": "{name} {price}U   [{stock}个]",
+  "product_detail_not_exists": "❌ 商品不存在",
+  "product_detail_price_not_set": "❌ 商品价格未设置",
+  "product_list_load_failed": "❌ 加载失败，请重试"
 }

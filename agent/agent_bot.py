@@ -2921,11 +2921,12 @@ class AgentBotHandlers:
                 
                 # 如果HQ克隆模式成功，直接渲染
                 if products_with_stock is not None:
+                    uid = query.from_user.id
                     text = (
-                        "<b>🛒 这是商品列表  选择你需要的分类：</b>\n\n"
-                        "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。\n\n"
-                        "❗有密码的账户售后时间1小时内，二级未知的账户售后30分钟内！\n\n"
-                        "❗购买后请第一时间检查账户，提供证明处理售后 超时损失自付！"
+                        f"<b>{self.core._t('product_list_title', uid)}</b>\n\n"
+                        f"{self.core._t('product_list_warning1', uid)}\n\n"
+                        f"{self.core._t('product_list_warning2', uid)}\n\n"
+                        f"{self.core._t('product_list_warning3', uid)}"
                     )
                     
                     kb = []
@@ -2935,18 +2936,18 @@ class AgentBotHandlers:
                         price = p['price']
                         stock = p['stock']
                         
-                        # ✅ 按钮格式
-                        button_text = f"{name} {price}U   [{stock}个]"
+                        # ✅ 按钮格式 - use translation for format
+                        button_text = self.core._t('product_list_item_format', uid, name=name, price=price, stock=stock)
                         kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
                     
                     # 如果没有有库存的商品
                     if not kb:
-                        kb.append([InlineKeyboardButton("暂无商品耐心等待", callback_data="no_action")])
+                        kb.append([InlineKeyboardButton(self.core._t('product_list_no_stock', uid), callback_data="no_action")])
                     
                     # ✅ 返回按钮
                     kb.append([
-                        InlineKeyboardButton("🔙 返回", callback_data="back_products"),
-                        InlineKeyboardButton("❌ 关闭", callback_data=f"close {query.from_user.id}")
+                        InlineKeyboardButton(self.core._t('button_back', uid), callback_data="back_products"),
+                        InlineKeyboardButton(self.core._t('button_close', uid), callback_data=f"close {query.from_user.id}")
                     ])
                     
                     self.safe_edit_message(query, text, kb, parse_mode='HTML')
@@ -3020,11 +3021,12 @@ class AgentBotHandlers:
             products_with_stock.sort(key=lambda x: -x['stock'])
             
             # ✅ 文本格式
+            uid = query.from_user.id
             text = (
-                "<b>🛒 这是商品列表  选择你需要的分类：</b>\n\n"
-                "❗️没使用过的本店商品的，请先少量购买测试，以免造成不必要的争执！谢谢合作！。\n\n"
-                "❗有密码的账户售后时间1小时内，二级未知的账户售后30分钟内！\n\n"
-                "❗购买后请第一时间检查账户，提供证明处理售后 超时损失自付！"
+                f"<b>{self.core._t('product_list_title', uid)}</b>\n\n"
+                f"{self.core._t('product_list_warning1', uid)}\n\n"
+                f"{self.core._t('product_list_warning2', uid)}\n\n"
+                f"{self.core._t('product_list_warning3', uid)}"
             )
             
             kb = []
@@ -3034,18 +3036,18 @@ class AgentBotHandlers:
                 price = p['price']
                 stock = p['stock']
                 
-                # ✅ 按钮格式
-                button_text = f"{name} {price}U   [{stock}个]"
+                # ✅ 按钮格式 - use translation for format
+                button_text = self.core._t('product_list_item_format', uid, name=name, price=price, stock=stock)
                 kb.append([InlineKeyboardButton(button_text, callback_data=f"product_{nowuid}")])
             
             # 如果没有有库存的商品
             if not kb:
-                kb.append([InlineKeyboardButton("暂无商品耐心等待", callback_data="no_action")])
+                kb.append([InlineKeyboardButton(self.core._t('product_list_no_stock', uid), callback_data="no_action")])
             
             # ✅ 返回按钮
             kb.append([
-                InlineKeyboardButton("🔙 返回", callback_data="back_products"),
-                InlineKeyboardButton("❌ 关闭", callback_data=f"close {query.from_user.id}")
+                InlineKeyboardButton(self.core._t('button_back', uid), callback_data="back_products"),
+                InlineKeyboardButton(self.core._t('button_close', uid), callback_data=f"close {query.from_user.id}")
             ])
             
             self.safe_edit_message(query, text, kb, parse_mode='HTML')
@@ -3054,21 +3056,23 @@ class AgentBotHandlers:
             logger.error(f"❌ 获取分类商品失败: {e}")
             import traceback
             traceback.print_exc()
-            self.safe_edit_message(query, "❌ 加载失败，请重试", [[InlineKeyboardButton("🔙 返回", callback_data="back_products")]], parse_mode=None)
+            uid = query.from_user.id
+            self.safe_edit_message(query, self.core._t('product_list_load_failed', uid), [[InlineKeyboardButton(self.core._t('button_back', uid), callback_data="back_products")]], parse_mode=None)
 
     def show_product_detail(self, query, nowuid: str):
         """显示商品详情 - 完全仿照总部格式"""
         try:
+            uid = query.from_user.id
             prod = self.core.config.ejfl.find_one({'nowuid': nowuid})
             if not prod:
-                self.safe_edit_message(query, "❌ 商品不存在", [[InlineKeyboardButton("🔙 返回", callback_data="back_products")]], parse_mode=None)
+                self.safe_edit_message(query, self.core._t('product_detail_not_exists', uid), [[InlineKeyboardButton(self.core._t('button_back', uid), callback_data="back_products")]], parse_mode=None)
                 return
             
             price = self.core.get_product_price(nowuid)
             stock = self.core.get_product_stock(nowuid)
             
             if price is None:
-                self.safe_edit_message(query, "❌ 商品价格未设置", [[InlineKeyboardButton("🔙 返回", callback_data="back_products")]], parse_mode=None)
+                self.safe_edit_message(query, self.core._t('product_detail_price_not_set', uid), [[InlineKeyboardButton(self.core._t('button_back', uid), callback_data="back_products")]], parse_mode=None)
                 return
             
             # ✅ 获取商品在代理价格表中的分类（统一后的分类）

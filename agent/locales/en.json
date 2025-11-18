@@ -268,10 +268,10 @@
   "error_generic": "An error occurred, please try again later",
   "error_network": "Network error, please check your connection",
   "error_timeout": "Operation timeout, please try again",
-  "button_close": "Close",
+  "button_close": "❌ Close",
   "button_cancel": "Cancel",
   "button_confirm": "Confirm",
-  "button_back": "Back",
+  "button_back": "🔙 Back",
   "button_next": "Next",
   "button_submit": "Submit",
   "button_save": "Save",
@@ -321,5 +321,14 @@
   "purchase_purchasing": "✅ You are purchasing - {product}",
   "purchase_unit_price": "💰 Unit price: {price} U",
   "purchase_your_balance": "🪙 Your balance: {balance} U",
-  "purchase_max_quantity": "📊 Max quantity: {max_qty}"
+  "purchase_max_quantity": "📊 Max quantity: {max_qty}",
+  "product_list_title": "🛒 Product List - Select Category:",
+  "product_list_warning1": "❗️If you haven't used our products before, please buy a small amount to test first to avoid unnecessary disputes. Thank you for your cooperation!",
+  "product_list_warning2": "❗️Accounts with passwords: after-sales service within 1 hour. Unknown 2FA accounts: within 30 minutes!",
+  "product_list_warning3": "❗️Please check accounts immediately after purchase. Provide proof for after-sales service. Losses due to timeout are at your own expense!",
+  "product_list_no_stock": "No products available, please wait patiently",
+  "product_list_item_format": "{name} {price}U   [{stock} pcs]",
+  "product_detail_not_exists": "❌ Product does not exist",
+  "product_detail_price_not_set": "❌ Product price not set",
+  "product_list_load_failed": "❌ Load failed, please try again"
 }
