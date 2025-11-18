@@ -3054,6 +3054,7 @@ class AgentBotHandlers:
         coll_name = f"agent_users_{self.core.config.AGENT_BOT_ID}"
         logger.info(f"🔍 DEBUG show_user_profile: uid={uid}, AGENT_BOT_ID={self.core.config.AGENT_BOT_ID}, collection={coll_name}")
     
+        # ✅ 始终从数据库直接查询用户信息（不使用缓存）
         info = self.core.get_user_info(uid)
     
         # 🔍 调试：打印查询结果
@@ -3062,15 +3063,23 @@ class AgentBotHandlers:
             self.safe_edit_message(query, "❌ 用户信息不存在", [[InlineKeyboardButton("🏠 主菜单", callback_data="back_main")]], parse_mode=None)
             return
         
-        avg = round(info.get('zgje', 0) / max(info.get('zgsl', 1), 1), 2)
-        level = '🥇 金牌' if info.get('zgje', 0) > 100 else '🥈 银牌' if info.get('zgje', 0) > 50 else '🥉 铜牌'
+        # ✅ 确保余额类型转换为 float，避免类型错误
+        usdt_balance = float(info.get('USDT', 0))
+        zgje = float(info.get('zgje', 0))
+        zgsl = int(info.get('zgsl', 0))
+        
+        # 🔍 调试：记录余额更新
+        logger.info(f"💰 Balance update for user {uid}: USDT={usdt_balance:.2f}, zgje={zgje:.2f}, zgsl={zgsl}")
+        
+        avg = round(zgje / max(zgsl, 1), 2)
+        level = '🥇 金牌' if zgje > 100 else '🥈 银牌' if zgje > 50 else '🥉 铜牌'
         
         text = (
             f"👤 个人中心\n\n"
             f"ID: {uid}\n"
             f"内部ID: {self.H(info.get('count_id', '-'))}\n"
-            f"余额: {info.get('USDT', 0):.2f}U\n"
-            f"累计消费: {info.get('zgje', 0):.2f}U  次数:{info.get('zgsl', 0)}\n"
+            f"余额: {usdt_balance:.2f}U\n"
+            f"累计消费: {zgje:.2f}U  次数:{zgsl}\n"
             f"平均订单: {avg:.2f}U\n"
             f"等级: {level}\n"
         )
@@ -3083,7 +3092,33 @@ class AgentBotHandlers:
             [InlineKeyboardButton("🏠 返回主菜单", callback_data="back_main")]
         ]
         
-        self.safe_edit_message(query, text, kb, parse_mode=None)
+        # ✅ 删除旧消息并发送新消息以强制 UI 刷新
+        # 这样可以确保即使余额被管理员手动更新，用户也能看到最新数据
+        try:
+            chat_id = query.message.chat_id
+            message_id = query.message.message_id
+            
+            # 删除旧消息
+            query.message.delete()
+            logger.info(f"✅ Deleted old profile message (message_id={message_id}) for user {uid}")
+            
+            # 发送新消息
+            markup = InlineKeyboardMarkup(kb)
+            Bot(self.core.config.BOT_TOKEN).send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=markup,
+                parse_mode=None
+            )
+            logger.info(f"✅ Sent new profile message for user {uid} with balance {usdt_balance:.2f}U")
+            
+            # 应答回调查询
+            query.answer("✅ 个人信息已刷新")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to refresh profile for user {uid}: {e}")
+            # 回退到原有的编辑消息方式
+            self.safe_edit_message(query, text, kb, parse_mode=None)
 
     # ========== 充值 UI ==========
     def _format_recharge_text(self, order: Dict) -> str:
