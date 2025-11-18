@@ -89,7 +89,20 @@ class AutoTranslator:
             )
             
             # 检查响应状态
-            if response.status_code != 200:
+            if response.status_code == 400:
+                error_msg = response.text[:200]
+                if "API key" in error_msg or "api key" in error_msg.lower():
+                    logger.error(
+                        f"❌ LibreTranslate requires API key. Get one at https://portal.libretranslate.com "
+                        f"and set LIBRETRANSLATE_API_KEY environment variable. "
+                        f"Alternatively, host your own instance: docker run -p 5000:5000 libretranslate/libretranslate"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ LibreTranslate API returned status {response.status_code}: {error_msg}"
+                    )
+                return text
+            elif response.status_code != 200:
                 logger.warning(
                     f"⚠️ LibreTranslate API returned status {response.status_code}: {response.text[:100]}"
                 )
