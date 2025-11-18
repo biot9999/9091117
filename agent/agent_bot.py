@@ -538,7 +538,15 @@ class AgentBotCore:
 
     def get_user_info(self, user_id: int) -> Optional[Dict]:
         try:
-            return self.config.get_agent_user_collection().find_one({'user_id': user_id})
+            collection = self.config.get_agent_user_collection()
+            logger.info(f"🔍 Querying collection: {collection.name} for user_id: {user_id}")
+            result = collection.find_one({'user_id': user_id})
+            if result:
+                logger.info(f"🔍 Found user document with _id: {result.get('_id')}")
+                logger.info(f"🔍 USDT field value: {result.get('USDT')} (type: {type(result.get('USDT')).__name__})")
+            else:
+                logger.warning(f"⚠️ No document found for user_id: {user_id}")
+            return result
         except Exception as e:
             logger.error(f"❌ 获取用户信息失败: {e}")
             return None
@@ -3050,9 +3058,18 @@ class AgentBotHandlers:
     def show_user_profile(self, query):
         """显示用户个人中心"""
         uid = query.from_user.id
-        # 🔍 调试：打印查询的集合名和配置
-        coll_name = f"agent_users_{self.core.config.AGENT_BOT_ID}"
-        logger.info(f"🔍 DEBUG show_user_profile: uid={uid}, AGENT_BOT_ID={self.core.config.AGENT_BOT_ID}, collection={coll_name}")
+        
+        # 🔍 调试：打印详细的数据库查询信息
+        agent_bot_id = self.core.config.AGENT_BOT_ID
+        suffix = agent_bot_id[6:] if agent_bot_id.startswith('agent_') else agent_bot_id
+        coll_name = f"agent_users_{suffix}"
+        db_name = self.core.config.DATABASE_NAME
+        
+        logger.info(f"🔍 DEBUG show_user_profile: uid={uid}")
+        logger.info(f"🔍 Database: {db_name}, Collection: {coll_name}")
+        logger.info(f"🔍 Query: {{user_id: {uid}}}")
+        logger.info(f"🔍 ADMIN NOTE: To manually update balance, use MongoDB command:")
+        logger.info(f"🔍   db.{coll_name}.updateOne({{user_id: {uid}}}, {{$set: {{USDT: <amount>}}}})")
     
         # ✅ 始终从数据库直接查询用户信息（不使用缓存）
         info = self.core.get_user_info(uid)
