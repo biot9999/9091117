@@ -2534,6 +2534,10 @@ class AgentBotHandlers:
                     return
             
             # ✅ 默认启动消息
+            # Get user's language for welcome message
+            uid = user.id
+            lang = self.core.get_user_lang(uid)
+            
             text = f"""🎉 欢迎使用 {self.H(self.core.config.AGENT_NAME)}！
 
 👤 用户信息
@@ -2543,17 +2547,22 @@ class AgentBotHandlers:
 
 请选择功能："""
             kb = [
-                [InlineKeyboardButton("🛍️ 商品中心", callback_data="products"),
-                 InlineKeyboardButton("👤 个人中心", callback_data="profile")],
-                [InlineKeyboardButton("💰 充值余额", callback_data="recharge"),
-                 InlineKeyboardButton("📊 订单历史", callback_data="orders")]
+                [InlineKeyboardButton(self.core._t("menu_products", uid), callback_data="products"),
+                 InlineKeyboardButton(self.core._t("menu_profile", uid), callback_data="profile")],
+                [InlineKeyboardButton(self.core._t("menu_recharge", uid), callback_data="recharge"),
+                 InlineKeyboardButton(self.core._t("menu_orders", uid), callback_data="orders")]
             ]
             if self.core.config.is_admin(user.id):
-                kb.append([InlineKeyboardButton("💰 价格管理", callback_data="price_management"),
-                           InlineKeyboardButton("📊 系统报表", callback_data="system_reports")])
-                kb.append([InlineKeyboardButton("💸 利润提现", callback_data="profit_center")])
-            kb.append([InlineKeyboardButton("📞 联系客服", callback_data="support"),
-                       InlineKeyboardButton("❓ 使用帮助", callback_data="help")])
+                kb.append([InlineKeyboardButton(self.core._t("menu_price_management", uid), callback_data="price_management"),
+                           InlineKeyboardButton(self.core._t("menu_system_reports", uid), callback_data="system_reports")])
+                kb.append([InlineKeyboardButton(self.core._t("menu_profit_center", uid), callback_data="profit_center")])
+            kb.append([InlineKeyboardButton(self.core._t("menu_support", uid), callback_data="support"),
+                       InlineKeyboardButton(self.core._t("menu_help", uid), callback_data="help")])
+            
+            # Add language toggle button
+            current_lang_name = "中文" if lang == "zh" else "English"
+            kb.append([InlineKeyboardButton(f"{self.core._t('menu_toggle_language', uid)} ({current_lang_name})", callback_data="toggle_language")])
+            
             update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
         else:
             update.message.reply_text("初始化失败，请稍后重试")
